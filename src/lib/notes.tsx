@@ -11,6 +11,12 @@ import {
 } from 'react';
 
 const STORAGE_KEY = 'notes:v1';
+const VIEW_KEY = 'notes:view';
+
+/** How the notes list is laid out. */
+export type NoteViewMode = 'grid' | 'title' | 'detail' | 'content';
+
+const VIEW_MODES: NoteViewMode[] = ['grid', 'title', 'detail', 'content'];
 
 export type TodoItem = {
   id: string;
@@ -52,6 +58,8 @@ type NotesContextValue = {
   createNote: () => Note;
   updateNote: (id: string, patch: Partial<Omit<Note, 'id' | 'createdAt'>>) => void;
   deleteNote: (id: string) => void;
+  viewMode: NoteViewMode;
+  setViewMode: (mode: NoteViewMode) => void;
 };
 
 const NotesContext = createContext<NotesContextValue | null>(null);
@@ -59,15 +67,19 @@ const NotesContext = createContext<NotesContextValue | null>(null);
 export function NotesProvider({ children }: { children: ReactNode }) {
   const [notes, setNotes] = useState<Note[]>([]);
   const [loading, setLoading] = useState(true);
+  const [viewMode, setViewModeState] = useState<NoteViewMode>('detail');
   const hydrated = useRef(false);
 
   useEffect(() => {
     (async () => {
       try {
-        const raw = await AsyncStorage.getItem(STORAGE_KEY);
-        if (raw) {
-          const parsed = JSON.parse(raw) as Note[];
+        const [raw, savedView] = await AsyncStorage.multiGet([STORAGE_KEY, VIEW_KEY]);
+        if (raw[1]) {
+          const parsed = JSON.parse(raw[1]) as Note[];
           if (Array.isArray(parsed)) setNotes(parsed);
+        }
+        if (savedView[1] && VIEW_MODES.includes(savedView[1] as NoteViewMode)) {
+          setViewModeState(savedView[1] as NoteViewMode);
         }
       } catch (e) {
         console.warn('Failed to load notes', e);
@@ -76,6 +88,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         setLoading(false);
       }
     })();
+  }, []);
+
+  const setViewMode = useCallback((mode: NoteViewMode) => {
+    setViewModeState(mode);
+    AsyncStorage.setItem(VIEW_KEY, mode).catch(() => {});
   }, []);
 
   // Persist whenever notes change (after the initial hydration).
@@ -110,8 +127,17 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   );
 
   const value = useMemo<NotesContextValue>(
-    () => ({ notes: sorted, loading, getNote, createNote, updateNote, deleteNote }),
-    [sorted, loading, getNote, createNote, updateNote, deleteNote],
+    () => ({
+      notes: sorted,
+      loading,
+      getNote,
+      createNote,
+      updateNote,
+      deleteNote,
+      viewMode,
+      setViewMode,
+    }),
+    [sorted, loading, getNote, createNote, updateNote, deleteNote, viewMode, setViewMode],
   );
 
   return <NotesContext.Provider value={value}>{children}</NotesContext.Provider>;
