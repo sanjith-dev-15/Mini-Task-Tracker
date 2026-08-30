@@ -31,6 +31,13 @@
           "image": "./assets/images/splash-goku.png",
           "imageWidth": 200
         }
+      ],
+      "@maplibre/maplibre-react-native",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow Goku to use your location to center the map and pin reminders."
+        }
       ]
     ],
     "experiments": {

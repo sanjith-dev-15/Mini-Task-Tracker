@@ -17,6 +17,7 @@ import { AnimatedSplash } from '@/components/animated-splash';
 import { GlassNav } from '@/components/glass-nav';
 import { Spacing } from '@/constants/theme';
 import { NotesProvider } from '@/lib/notes';
+import { RemindersProvider } from '@/lib/reminders';
 import { ThemeProvider, useThemeContext } from '@/lib/theme';
 
 // Keep the native splash up until <AnimatedSplash> takes over.
@@ -41,7 +42,9 @@ export default function RootLayout() {
       <SafeAreaProvider>
         <ThemeProvider>
           <NotesProvider>
-            <ThemedRoot />
+            <RemindersProvider>
+              <ThemedRoot />
+            </RemindersProvider>
           </NotesProvider>
         </ThemeProvider>
       </SafeAreaProvider>
@@ -58,6 +61,8 @@ function ThemedRoot() {
     <NavThemeProvider value={isDark ? DarkTheme : DefaultTheme}>
       <Drawer
         drawerContent={(props) => <SidebarContent {...props} />}
+        initialRouteName="(tabs)"
+        backBehavior="initialRoute"
         screenOptions={{
           headerShown: false,
           drawerStyle: { backgroundColor: colors.card, width: 260 },
@@ -66,6 +71,14 @@ function ThemedRoot() {
         <Drawer.Screen name="notes" options={{ title: 'Notes' }} />
         <Drawer.Screen name="(tabs)" options={{ title: 'Mini Task Tracker' }} />
         <Drawer.Screen name="settings" options={{ title: 'Settings' }} />
+        <Drawer.Screen
+          name="reminder"
+          options={{ title: 'Reminder', drawerItemStyle: { display: 'none' } }}
+        />
+        <Drawer.Screen
+          name="map"
+          options={{ title: 'Map', drawerItemStyle: { display: 'none' } }}
+        />
       </Drawer>
       <GlassNav />
       <StatusBar style={isDark ? 'light' : 'dark'} />

@@ -6,6 +6,7 @@ import {
   Alert,
   FlatList,
   Pressable,
+  ScrollView,
   StyleSheet,
   TextInput,
   View,
@@ -16,18 +17,24 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { notePreview, useNotes, type Note } from '@/lib/notes';
+import { notePreview, useNotes, type Note, type NoteViewMode } from '@/lib/notes';
 
-function relativeTime(ts: number): string {
-  const diff = Date.now() - ts;
-  const min = Math.round(diff / 60000);
-  if (min < 1) return 'just now';
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.round(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  const day = Math.round(hr / 24);
-  if (day < 7) return `${day}d ago`;
-  return new Date(ts).toLocaleDateString();
+function noteDate(ts: number): string {
+  const d = new Date(ts);
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return d.toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    ...(sameYear ? {} : { year: 'numeric' }),
+  });
+}
+
+/** Full multi-line preview text for a note: its body, or its to-do lines. */
+function noteBody(note: Note): string {
+  const body = note.body.trim();
+  if (body) return body;
+  if (note.todos.length) return note.todos.map((t) => t.text).join('\n');
+  return '';
 }
 
 function matches(note: Note, q: string): boolean {
@@ -40,13 +47,31 @@ function matches(note: Note, q: string): boolean {
   );
 }
 
+const VIEW_OPTIONS: {
+  mode: NoteViewMode;
+  label: string;
+  icon: keyof typeof Ionicons.glyphMap;
+}[] = [
+  { mode: 'grid', label: 'Grid', icon: 'grid-outline' },
+  { mode: 'title', label: 'Title', icon: 'list-outline' },
+  { mode: 'detail', label: 'Detail', icon: 'reorder-four-outline' },
+  { mode: 'content', label: 'Content', icon: 'document-text-outline' },
+];
+
 export default function NotesListScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const { notes, loading, createNote, deleteNote } = useNotes();
+  const { notes, loading, createNote, deleteNote, viewMode, setViewMode } = useNotes();
   const [query, setQuery] = useState('');
 
   const filtered = useMemo(() => notes.filter((n) => matches(n, query)), [notes, query]);
+
+  // Two-column masonry split for grid mode.
+  const gridColumns = useMemo(() => {
+    const cols: Note[][] = [[], []];
+    filtered.forEach((n, i) => cols[i % 2].push(n));
+    return cols;
+  }, [filtered]);
 
   const openNote = (noteId: string) =>
     router.push({ pathname: '/notes/[id]', params: { id: noteId } });
@@ -63,58 +88,121 @@ export default function NotesListScreen() {
     ]);
   };
 
+  const bottomPad = insets.bottom + Spacing.six + Spacing.six;
+
+  const emptyText = loading
+    ? 'Loading…'
+    : query
+      ? 'No notes match your search.'
+      : 'Tap + to write your first note.';
+
   return (
     <ThemedView style={styles.screen}>
-      <View style={[styles.inner, { paddingTop: insets.top + Spacing.two }]}>
-        <View style={styles.topRow}>
-          <DrawerToggleButton tintColor={theme.text} />
-        </View>
-
-        <ThemedText type="title" style={styles.heading}>
+      <View style={[styles.header, { paddingTop: insets.top + Spacing.one }]}>
+        <DrawerToggleButton tintColor={theme.text} />
+        <ThemedText type="subtitle" style={styles.headerTitle}>
           Notes
         </ThemedText>
-        <ThemedText type="small" themeColor="textSecondary" style={styles.subheading}>
-          {notes.length === 0
-            ? 'Nothing yet'
-            : `${notes.length} ${notes.length === 1 ? 'note' : 'notes'}`}
-        </ThemedText>
-
-        <TextInput
-          value={query}
-          onChangeText={setQuery}
-          placeholder="Search"
-          placeholderTextColor={theme.textSecondary}
-          style={[styles.search, { backgroundColor: theme.backgroundElement, color: theme.text }]}
-          returnKeyType="search"
-          clearButtonMode="while-editing"
-        />
-
-        <FlatList
-          data={filtered}
-          keyExtractor={(n) => n.id}
-          contentContainerStyle={[
-            styles.list,
-            { paddingBottom: insets.bottom + Spacing.six + Spacing.six },
-          ]}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-          ListEmptyComponent={
-            <ThemedText themeColor="textSecondary" style={styles.empty}>
-              {loading
-                ? 'Loading…'
-                : query
-                  ? 'No notes match your search.'
-                  : 'Tap + to write your first note.'}
+        {notes.length > 0 && (
+          <View style={[styles.countPill, { backgroundColor: theme.backgroundElement }]}>
+            <ThemedText type="smallBold" themeColor="textSecondary">
+              {notes.length}
             </ThemedText>
-          }
-          renderItem={({ item }) => (
-            <NoteCard
-              note={item}
-              onPress={() => openNote(item.id)}
-              onLongPress={() => confirmDelete(item)}
-            />
-          )}
-        />
+          </View>
+        )}
+      </View>
+
+      <View style={styles.page}>
+        <View style={[styles.searchWrap, { backgroundColor: theme.backgroundElement }]}>
+          <Ionicons name="search" size={17} color={theme.textSecondary} />
+          <TextInput
+            value={query}
+            onChangeText={setQuery}
+            placeholder="Search notes"
+            placeholderTextColor={theme.textSecondary}
+            style={[styles.searchInput, { color: theme.text }]}
+            returnKeyType="search"
+            clearButtonMode="while-editing"
+          />
+        </View>
+
+        <View style={[styles.viewSwitch, { backgroundColor: theme.backgroundElement }]}>
+          {VIEW_OPTIONS.map((opt) => {
+            const active = viewMode === opt.mode;
+            return (
+              <Pressable
+                key={opt.mode}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={`${opt.label} view`}
+                onPress={() => setViewMode(opt.mode)}
+                style={[
+                  styles.viewSwitchItem,
+                  active && { backgroundColor: theme.card },
+                ]}>
+                <Ionicons
+                  name={opt.icon}
+                  size={15}
+                  color={active ? theme.accent : theme.textSecondary}
+                />
+                <ThemedText
+                  type="smallBold"
+                  numberOfLines={1}
+                  style={[
+                    styles.viewSwitchLabel,
+                    { color: active ? theme.text : theme.textSecondary },
+                  ]}>
+                  {opt.label}
+                </ThemedText>
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
+
+      <View style={[styles.page, styles.listArea]}>
+        {filtered.length === 0 ? (
+          <ThemedText themeColor="textSecondary" style={styles.empty}>
+            {emptyText}
+          </ThemedText>
+        ) : viewMode === 'grid' ? (
+          <ScrollView
+            contentContainerStyle={[styles.gridScroll, { paddingBottom: bottomPad }]}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}>
+            {gridColumns.map((col, ci) => (
+              <View key={ci} style={styles.gridColumn}>
+                {col.map((note) => (
+                  <GridCard
+                    key={note.id}
+                    note={note}
+                    onPress={() => openNote(note.id)}
+                    onLongPress={() => confirmDelete(note)}
+                  />
+                ))}
+              </View>
+            ))}
+          </ScrollView>
+        ) : (
+          <FlatList
+            key={viewMode}
+            data={filtered}
+            keyExtractor={(n) => n.id}
+            contentContainerStyle={[styles.list, { paddingBottom: bottomPad }]}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+            renderItem={({ item }) => {
+              const props = {
+                note: item,
+                onPress: () => openNote(item.id),
+                onLongPress: () => confirmDelete(item),
+              };
+              if (viewMode === 'title') return <TitleRow {...props} />;
+              if (viewMode === 'content') return <ContentRow {...props} />;
+              return <DetailCard {...props} />;
+            }}
+          />
+        )}
       </View>
 
       <Pressable
@@ -134,17 +222,49 @@ export default function NotesListScreen() {
   );
 }
 
-function NoteCard({
-  note,
-  onPress,
-  onLongPress,
-}: {
+type CardProps = {
   note: Note;
   onPress: () => void;
   onLongPress: () => void;
-}) {
+};
+
+function useCardText(note: Note) {
+  const title = note.title.trim() || notePreview(note);
+  const body = noteBody(note);
+  const done = note.todos.filter((t) => t.done).length;
+  return { title, body, done, total: note.todos.length };
+}
+
+/** Grid: a content-preview tile with the title + date underneath, centered. */
+function GridCard({ note, onPress, onLongPress }: CardProps) {
   const theme = useTheme();
-  const doneCount = note.todos.filter((t) => t.done).length;
+  const { title, body } = useCardText(note);
+
+  return (
+    <Pressable
+      onPress={onPress}
+      onLongPress={onLongPress}
+      delayLongPress={300}
+      style={({ pressed }) => [styles.gridItem, { opacity: pressed ? 0.7 : 1 }]}>
+      <View style={[styles.gridTile, { backgroundColor: theme.card, borderColor: theme.border }]}>
+        <ThemedText type="small" themeColor="textSecondary" numberOfLines={14}>
+          {body || 'No additional text'}
+        </ThemedText>
+      </View>
+      <ThemedText type="subtitle" numberOfLines={2} style={styles.gridTitle}>
+        {title}
+      </ThemedText>
+      <ThemedText type="small" themeColor="textSecondary" style={styles.gridDate}>
+        {noteDate(note.updatedAt)}
+      </ThemedText>
+    </Pressable>
+  );
+}
+
+/** Detail: one wide card with title, date and a body preview stacked inside. */
+function DetailCard({ note, onPress, onLongPress }: CardProps) {
+  const theme = useTheme();
+  const { title, body, done, total } = useCardText(note);
 
   return (
     <Pressable
@@ -152,57 +272,193 @@ function NoteCard({
       onLongPress={onLongPress}
       delayLongPress={300}
       style={({ pressed }) => [
-        styles.card,
+        styles.detailCard,
         { backgroundColor: theme.card, borderColor: theme.border, opacity: pressed ? 0.7 : 1 },
       ]}>
       <ThemedText type="subtitle" numberOfLines={1}>
-        {note.title.trim() || notePreview(note)}
+        {title}
       </ThemedText>
-      <ThemedText type="small" themeColor="textSecondary" numberOfLines={2} style={styles.cardPreview}>
-        {note.title.trim() ? notePreview(note) : note.body.trim() || ' '}
+      <ThemedText type="small" themeColor="textSecondary" style={styles.detailDate}>
+        {noteDate(note.updatedAt)}
       </ThemedText>
-      <View style={styles.cardMeta}>
-        <ThemedText type="small" themeColor="textSecondary">
-          {relativeTime(note.updatedAt)}
+      {body ? (
+        <ThemedText type="body" themeColor="textSecondary" numberOfLines={6}>
+          {body}
         </ThemedText>
-        {note.todos.length > 0 && (
-          <ThemedText type="smallBold" style={{ color: theme.accent }}>
-            {doneCount}/{note.todos.length} done
-          </ThemedText>
-        )}
+      ) : null}
+      {total > 0 && (
+        <ThemedText type="smallBold" style={{ color: theme.accent, marginTop: Spacing.two }}>
+          {done}/{total} done
+        </ThemedText>
+      )}
+    </Pressable>
+  );
+}
+
+/** Content: a small preview thumbnail on the left, big title + date on the right. */
+function ContentRow({ note, onPress, onLongPress }: CardProps) {
+  const theme = useTheme();
+  const { title, body } = useCardText(note);
+
+  return (
+    <Pressable
+      onPress={onPress}
+      onLongPress={onLongPress}
+      delayLongPress={300}
+      style={({ pressed }) => [styles.contentRow, { opacity: pressed ? 0.7 : 1 }]}>
+      <View style={[styles.contentThumb, { backgroundColor: theme.card, borderColor: theme.border }]}>
+        <ThemedText
+          type="small"
+          themeColor="textSecondary"
+          numberOfLines={12}
+          style={styles.contentThumbText}>
+          {body || 'No additional text'}
+        </ThemedText>
       </View>
+      <View style={styles.contentMain}>
+        <ThemedText numberOfLines={3} style={styles.contentTitle}>
+          {title}
+        </ThemedText>
+        <ThemedText type="small" themeColor="textSecondary" style={styles.contentDate}>
+          {noteDate(note.updatedAt)}
+        </ThemedText>
+      </View>
+    </Pressable>
+  );
+}
+
+/** Title: a single compact row. */
+function TitleRow({ note, onPress, onLongPress }: CardProps) {
+  const theme = useTheme();
+  const { title } = useCardText(note);
+
+  return (
+    <Pressable
+      onPress={onPress}
+      onLongPress={onLongPress}
+      delayLongPress={300}
+      style={({ pressed }) => [
+        styles.titleRow,
+        { borderColor: theme.border, opacity: pressed ? 0.6 : 1 },
+      ]}>
+      <ThemedText type="body" numberOfLines={1} style={styles.titleRowText}>
+        {title}
+      </ThemedText>
+      <Ionicons name="chevron-forward" size={16} color={theme.textSecondary} />
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
-  inner: { flex: 1, width: '100%', maxWidth: MaxContentWidth, alignSelf: 'center', paddingHorizontal: Spacing.three },
-  topRow: { flexDirection: 'row', alignItems: 'center', height: 32 },
-  heading: { marginTop: Spacing.one },
-  subheading: { marginTop: Spacing.half, marginBottom: Spacing.three },
-  search: {
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.one,
+    paddingRight: Spacing.three,
+    paddingBottom: Spacing.two,
+  },
+  headerTitle: { flex: 1 },
+  countPill: {
+    minWidth: 26,
+    height: 22,
+    borderRadius: 11,
+    paddingHorizontal: Spacing.two,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  page: {
+    width: '100%',
+    maxWidth: MaxContentWidth,
+    alignSelf: 'center',
+    paddingHorizontal: Spacing.three,
+  },
+  searchWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
     height: 42,
     borderRadius: 12,
     paddingHorizontal: Spacing.three,
-    fontSize: 16,
+    marginBottom: Spacing.two,
+  },
+  searchInput: { flex: 1, fontSize: 16, height: '100%' },
+  viewSwitch: {
+    flexDirection: 'row',
+    borderRadius: 12,
+    padding: 3,
+    gap: 2,
     marginBottom: Spacing.three,
   },
-  list: { gap: Spacing.two, flexGrow: 1 },
+  viewSwitchItem: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    paddingVertical: Spacing.two,
+    borderRadius: 9,
+  },
+  viewSwitchLabel: { fontSize: 12, flexShrink: 1 },
+  listArea: { flex: 1 },
   empty: { textAlign: 'center', marginTop: Spacing.six },
-  card: {
-    borderRadius: 16,
+
+  list: { gap: Spacing.two, flexGrow: 1 },
+
+  // Grid
+  gridScroll: { flexDirection: 'row', gap: Spacing.three },
+  gridColumn: { flex: 1, gap: Spacing.four },
+  gridItem: { gap: Spacing.two },
+  gridTile: {
+    minHeight: 150,
+    borderRadius: 20,
     borderWidth: StyleSheet.hairlineWidth,
     padding: Spacing.three,
-    gap: Spacing.one,
+    overflow: 'hidden',
   },
-  cardPreview: { minHeight: 18 },
-  cardMeta: {
+  gridTitle: { textAlign: 'center', fontWeight: '700' },
+  gridDate: { textAlign: 'center' },
+
+  // Detail
+  detailCard: {
+    borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: Spacing.three,
+  },
+  detailDate: { marginTop: Spacing.half, marginBottom: Spacing.two },
+
+  // Content
+  contentRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: Spacing.one,
+    gap: Spacing.three,
+    paddingVertical: Spacing.two,
   },
+  contentThumb: {
+    width: 96,
+    height: 132,
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: Spacing.two,
+    overflow: 'hidden',
+  },
+  contentThumbText: { fontSize: 7, lineHeight: 9 },
+  contentMain: { flex: 1, gap: Spacing.one },
+  contentTitle: { fontSize: 26, lineHeight: 32, fontWeight: '700' },
+  contentDate: { fontSize: 15 },
+
+  // Title
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.two,
+    paddingVertical: Spacing.two + 2,
+    paddingHorizontal: Spacing.one,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  titleRowText: { flex: 1 },
+
   fab: {
     position: 'absolute',
     right: Spacing.four,

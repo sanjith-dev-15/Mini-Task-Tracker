@@ -1,13 +1,16 @@
 import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
-import type { ReactNode } from 'react';
+import * as Location from 'expo-location';
 import { DrawerToggleButton } from 'expo-router/drawer';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useCallback, useState, type ReactNode } from 'react';
+import { useFocusEffect } from 'expo-router';
+import { Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
+import { grantLabel, PERMISSIONS, type PermissionInfo } from '@/lib/permissions';
 import { useThemeContext, type ThemeMode } from '@/lib/theme';
 
 const APPEARANCE_OPTIONS: {
@@ -56,6 +59,15 @@ export default function SettingsScreen() {
           </View>
         </Section>
 
+        <Section title="Permissions">
+          <ThemedText type="small" themeColor="textSecondary" style={styles.sectionIntro}>
+            Everything {appName} asks the system for, and why. Nothing here leaves your device.
+          </ThemedText>
+          {PERMISSIONS.map((info) => (
+            <PermissionCard key={info.key} info={info} />
+          ))}
+        </Section>
+
         <Section title="About">
           <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <View style={styles.row}>
@@ -74,6 +86,106 @@ export default function SettingsScreen() {
         </Section>
       </ScrollView>
     </ThemedView>
+  );
+}
+
+function PermissionCard({ info }: { info: PermissionInfo }) {
+  const { colors } = useThemeContext();
+
+  return (
+    <View style={[styles.permCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+      <View style={styles.permHead}>
+        <Ionicons name={info.icon} size={20} color={colors.text} />
+        <ThemedText style={styles.permTitle}>{info.title}</ThemedText>
+        <View style={[styles.badge, { backgroundColor: colors.backgroundElement }]}>
+          <ThemedText type="smallBold" themeColor="textSecondary">
+            {grantLabel(info)}
+          </ThemedText>
+        </View>
+      </View>
+
+      <ThemedText type="small" style={styles.permText}>
+        {info.purpose}
+      </ThemedText>
+      <ThemedText type="small" themeColor="textSecondary" style={styles.permText}>
+        {info.detail}
+      </ThemedText>
+
+      {info.key === 'location' && <LocationControl />}
+
+      <ThemedText type="small" themeColor="textSecondary" style={styles.permAndroid}>
+        {info.android.join(' · ')}
+      </ThemedText>
+    </View>
+  );
+}
+
+type LocState = 'granted' | 'denied' | 'undetermined' | 'unavailable';
+
+function LocationControl() {
+  const { colors } = useThemeContext();
+  const [state, setState] = useState<LocState>('undetermined');
+  const [canAsk, setCanAsk] = useState(true);
+  const [busy, setBusy] = useState(false);
+
+  const refresh = useCallback(async () => {
+    try {
+      const res = await Location.getForegroundPermissionsAsync();
+      setState(res.granted ? 'granted' : res.canAskAgain ? 'undetermined' : 'denied');
+      setCanAsk(res.canAskAgain);
+    } catch {
+      setState('unavailable');
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      refresh();
+    }, [refresh]),
+  );
+
+  const onPress = async () => {
+    if (busy) return;
+    if (state === 'undetermined' && canAsk) {
+      setBusy(true);
+      try {
+        const res = await Location.requestForegroundPermissionsAsync();
+        setState(res.granted ? 'granted' : res.canAskAgain ? 'undetermined' : 'denied');
+        setCanAsk(res.canAskAgain);
+      } catch {
+        setState('unavailable');
+      } finally {
+        setBusy(false);
+      }
+    } else {
+      Linking.openSettings();
+    }
+  };
+
+  const meta: Record<LocState, { text: string; color: string; action: string | null }> = {
+    granted: { text: 'Allowed', color: colors.accent, action: 'Manage in system settings' },
+    undetermined: { text: 'Not asked yet', color: colors.textSecondary, action: 'Allow location' },
+    denied: { text: 'Denied', color: colors.danger, action: 'Open system settings' },
+    unavailable: { text: 'Not available in this build', color: colors.textSecondary, action: null },
+  };
+  const m = meta[state];
+
+  return (
+    <View style={[styles.locRow, { borderTopColor: colors.border }]}>
+      <View style={styles.locStatus}>
+        <View style={[styles.dot, { backgroundColor: m.color }]} />
+        <ThemedText type="small" style={{ color: m.color }}>
+          {m.text}
+        </ThemedText>
+      </View>
+      {m.action && (
+        <Pressable onPress={onPress} hitSlop={8} disabled={busy}>
+          <ThemedText type="smallBold" style={{ color: colors.accent, opacity: busy ? 0.5 : 1 }}>
+            {m.action}
+          </ThemedText>
+        </Pressable>
+      )}
+    </View>
   );
 }
 
@@ -106,6 +218,7 @@ const styles = StyleSheet.create({
   },
   section: { gap: Spacing.two },
   sectionTitle: { letterSpacing: 1, paddingHorizontal: Spacing.one },
+  sectionIntro: { paddingHorizontal: Spacing.one, marginBottom: Spacing.half },
   card: {
     borderRadius: 14,
     borderWidth: StyleSheet.hairlineWidth,
@@ -120,4 +233,31 @@ const styles = StyleSheet.create({
   },
   rowIcon: { width: 24 },
   rowLabel: { flex: 1 },
+
+  permCard: {
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: Spacing.three,
+    gap: Spacing.one,
+  },
+  permHead: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
+  permTitle: { flex: 1, fontWeight: '600' },
+  badge: {
+    borderRadius: 999,
+    paddingHorizontal: Spacing.two,
+    paddingVertical: 2,
+  },
+  permText: { marginTop: 2 },
+  permAndroid: { marginTop: Spacing.two, fontSize: 11, opacity: 0.8 },
+  locRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.two,
+    marginTop: Spacing.two,
+    paddingTop: Spacing.two,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  locStatus: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
+  dot: { width: 8, height: 8, borderRadius: 4 },
 });
