@@ -1,4 +1,3 @@
-import { Ionicons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
 import { DrawerToggleButton } from 'expo-router/drawer';
 
@@ -6,40 +5,28 @@ import { useTheme } from '@/hooks/use-theme';
 
 /**
  * Bottom-tab navigator for the "Mini Task Tracker" section (sidebar item #2).
- * Tabs: Home (`/`) and Tasks (`/tasks`). App-wide Settings lives in the sidebar.
- * The header shows a ☰ button that opens the sidebar.
+ * The tab bar is hidden — navigation is handled by the global <GlassNav> pill
+ * rendered in the root layout. The header keeps the ☰ button for the sidebar.
  */
+export const unstable_settings = {
+  initialRouteName: 'index',
+};
+
 export default function TabsLayout() {
   const colors = useTheme();
 
   return (
     <Tabs
+      tabBar={() => null}
       screenOptions={{
         headerLeft: () => <DrawerToggleButton tintColor={colors.text} />,
         headerStyle: { backgroundColor: colors.background },
         headerTitleStyle: { color: colors.text },
         headerShadowVisible: false,
         sceneStyle: { backgroundColor: colors.background },
-        tabBarActiveTintColor: colors.accent,
-        tabBarInactiveTintColor: colors.textSecondary,
-        tabBarStyle: { backgroundColor: colors.card, borderTopColor: colors.border },
       }}>
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: 'Home',
-          tabBarIcon: ({ color, size }) => <Ionicons name="home-outline" size={size} color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="tasks"
-        options={{
-          title: 'Tasks',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="checkbox-outline" size={size} color={color} />
-          ),
-        }}
-      />
+      <Tabs.Screen name="index" options={{ title: 'Home' }} />
+      <Tabs.Screen name="tasks" options={{ title: 'Tasks' }} />
     </Tabs>
   );
 }

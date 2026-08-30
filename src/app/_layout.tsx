@@ -6,27 +6,36 @@ import {
   DrawerItem,
   type DrawerContentComponentProps,
 } from 'expo-router/drawer';
+import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
+import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { AnimatedSplash } from '@/components/animated-splash';
+import { GlassNav } from '@/components/glass-nav';
 import { Spacing } from '@/constants/theme';
 import { NotesProvider } from '@/lib/notes';
 import { ThemeProvider, useThemeContext } from '@/lib/theme';
+
+// Keep the native splash up until <AnimatedSplash> takes over.
+SplashScreen.preventAutoHideAsync().catch(() => {});
 
 /**
  * Root layout.
  * - Global providers: safe area, gestures, theme, notes store.
  * - The sidebar (Drawer): Notes + Mini Task Tracker at the top, Settings pinned
  *   to the bottom (see `SidebarContent`).
- * The app opens on "Notes" (see `unstable_settings`).
+ * The app opens on the Mini Task Tracker Home tab (see `unstable_settings`).
  */
 export const unstable_settings = {
-  initialRouteName: 'notes',
+  initialRouteName: '(tabs)',
 };
 
 export default function RootLayout() {
+  const [splashDone, setSplashDone] = useState(false);
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
@@ -36,6 +45,7 @@ export default function RootLayout() {
           </NotesProvider>
         </ThemeProvider>
       </SafeAreaProvider>
+      {!splashDone && <AnimatedSplash onFinish={() => setSplashDone(true)} />}
     </GestureHandlerRootView>
   );
 }
@@ -57,6 +67,7 @@ function ThemedRoot() {
         <Drawer.Screen name="(tabs)" options={{ title: 'Mini Task Tracker' }} />
         <Drawer.Screen name="settings" options={{ title: 'Settings' }} />
       </Drawer>
+      <GlassNav />
       <StatusBar style={isDark ? 'light' : 'dark'} />
     </NavThemeProvider>
   );
