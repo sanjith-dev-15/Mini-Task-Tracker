@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { DrawerToggleButton } from 'expo-router/drawer';
 import { useMemo, useState } from 'react';
@@ -67,6 +68,16 @@ export default function NotesListScreen() {
       <View style={[styles.inner, { paddingTop: insets.top + Spacing.two }]}>
         <View style={styles.topRow}>
           <DrawerToggleButton tintColor={theme.text} />
+          <Pressable
+            accessibilityLabel="New note"
+            onPress={openNew}
+            hitSlop={10}
+            style={({ pressed }) => [
+              styles.addButton,
+              { backgroundColor: theme.accent, opacity: pressed ? 0.85 : 1 },
+            ]}>
+            <Ionicons name="add" size={24} color="#fff" />
+          </Pressable>
         </View>
 
         <ThemedText type="title" style={styles.heading}>
@@ -93,7 +104,7 @@ export default function NotesListScreen() {
           keyExtractor={(n) => n.id}
           contentContainerStyle={[
             styles.list,
-            { paddingBottom: insets.bottom + Spacing.six + Spacing.five },
+            { paddingBottom: insets.bottom + Spacing.six + Spacing.four },
           ]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
@@ -115,16 +126,6 @@ export default function NotesListScreen() {
           )}
         />
       </View>
-
-      <Pressable
-        accessibilityLabel="New note"
-        onPress={openNew}
-        style={({ pressed }) => [
-          styles.fab,
-          { backgroundColor: theme.accent, bottom: insets.bottom + Spacing.four, opacity: pressed ? 0.85 : 1 },
-        ]}>
-        <ThemedText style={styles.fabIcon}>+</ThemedText>
-      </Pressable>
     </ThemedView>
   );
 }
@@ -173,7 +174,19 @@ function NoteCard({
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   inner: { flex: 1, width: '100%', maxWidth: MaxContentWidth, alignSelf: 'center', paddingHorizontal: Spacing.three },
-  topRow: { flexDirection: 'row', alignItems: 'center', height: 32 },
+  topRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    height: 40,
+  },
+  addButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   heading: { marginTop: Spacing.one },
   subheading: { marginTop: Spacing.half, marginBottom: Spacing.three },
   search: {
@@ -198,19 +211,4 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: Spacing.one,
   },
-  fab: {
-    position: 'absolute',
-    right: Spacing.four,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 6,
-  },
-  fabIcon: { color: '#fff', fontSize: 30, lineHeight: 34, fontWeight: '300' },
 });

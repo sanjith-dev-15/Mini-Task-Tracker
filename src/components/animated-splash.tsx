@@ -1,6 +1,6 @@
 import { Image } from 'expo-image';
 import * as SplashScreen from 'expo-splash-screen';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { StyleSheet } from 'react-native';
 import Animated, {
   Easing,
@@ -26,8 +26,13 @@ export function AnimatedSplash({ onFinish }: { onFinish: () => void }) {
   const float = useSharedValue(0);
   const scale = useSharedValue(0.9);
   const opacity = useSharedValue(1);
+  const onFinishRef = useRef(onFinish);
+  onFinishRef.current = onFinish;
 
+  // Run exactly once — a fresh `onFinish` identity must not restart the timer.
   useEffect(() => {
+    const finish = () => onFinishRef.current();
+
     // Hand off from the native splash to this animated one.
     SplashScreen.hideAsync().catch(() => {});
 
@@ -44,10 +49,11 @@ export function AnimatedSplash({ onFinish }: { onFinish: () => void }) {
     opacity.value = withDelay(
       HOLD_MS,
       withTiming(0, { duration: 450 }, (finished) => {
-        if (finished) runOnJS(onFinish)();
+        if (finished) runOnJS(finish)();
       }),
     );
-  }, [float, scale, opacity, onFinish]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const overlayStyle = useAnimatedStyle(() => ({ opacity: opacity.value }));
   const gokuStyle = useAnimatedStyle(() => ({
