@@ -50,7 +50,7 @@ function ThemedRoot() {
         drawerContent={(props) => <SidebarContent {...props} />}
         screenOptions={{
           headerShown: false,
-          drawerStyle: { backgroundColor: colors.card },
+          drawerStyle: { backgroundColor: colors.card, width: 260 },
           drawerType: 'front',
         }}>
         <Drawer.Screen name="notes" options={{ title: 'Notes' }} />
