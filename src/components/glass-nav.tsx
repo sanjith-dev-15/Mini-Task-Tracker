@@ -103,6 +103,9 @@ export function GlassNav() {
     });
   };
 
+  // Full-screen map owns the whole screen — no floating nav there.
+  if (pathname === '/map') return null;
+
   return (
     <View style={[styles.wrap, { paddingBottom: insets.bottom + 10 }]} pointerEvents="box-none">
       <GlassContainer spacing={18}>
