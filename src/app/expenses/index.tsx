@@ -1,11 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { DrawerToggleButton } from 'expo-router/drawer';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GlassSurface } from '@/components/glass-surface';
+import { MonthCalendar } from '@/components/month-calendar';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
@@ -15,8 +16,10 @@ import {
   currentMonthName,
   daysElapsedThisMonth,
   formatMoney,
+  fullDayLabel,
   groupByDay,
   lastMonth,
+  spendByDay,
   sumAmount,
   thisMonth,
   totalsByCategory,
@@ -45,7 +48,13 @@ export default function ExpensesScreen() {
     };
   }, [expenses]);
 
-  const groups = useMemo(() => groupByDay(expenses), [expenses]);
+  const allGroups = useMemo(() => groupByDay(expenses), [expenses]);
+  const dayMap = useMemo(() => spendByDay(expenses), [expenses]);
+
+  const [focusedDay, setFocusedDay] = useState<number | null>(null);
+  const groups = focusedDay
+    ? allGroups.filter((g) => g.key === String(focusedDay))
+    : allGroups;
 
   const openNew = () => router.push('/expenses/new');
   const openEdit = (id: string) =>
@@ -153,14 +162,40 @@ export default function ExpensesScreen() {
           )}
         </GlassSurface>
 
+        {/* ---------- calendar ---------- */}
+        <GlassSurface style={styles.card}>
+          <ThemedText type="smallBold" themeColor="textSecondary" style={styles.cardTitle}>
+            BY DAY
+          </ThemedText>
+          <MonthCalendar
+            maxToday
+            selected={focusedDay}
+            spendByDay={dayMap}
+            onSelect={(ts) => setFocusedDay((cur) => (cur === ts ? null : ts))}
+          />
+        </GlassSurface>
+
         {/* ---------- recent ---------- */}
-        <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
-          RECENT
-        </ThemedText>
+        <View style={styles.recentHead}>
+          <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
+            {focusedDay ? fullDayLabel(focusedDay).toUpperCase() : 'RECENT'}
+          </ThemedText>
+          {focusedDay && (
+            <Pressable onPress={() => setFocusedDay(null)} hitSlop={8}>
+              <ThemedText type="smallBold" style={{ color: theme.accent }}>
+                Show all
+              </ThemedText>
+            </Pressable>
+          )}
+        </View>
 
         {groups.length === 0 ? (
           <ThemedText type="small" themeColor="textSecondary" style={styles.empty}>
-            {loading ? 'Loading…' : 'Tap + to log your first expense.'}
+            {loading
+              ? 'Loading…'
+              : focusedDay
+                ? 'Nothing spent on this day.'
+                : 'Tap + to log your first expense.'}
           </ThemedText>
         ) : (
           groups.map((g) => (
@@ -317,7 +352,13 @@ const styles = StyleSheet.create({
   dot: { width: 10, height: 10, borderRadius: 5 },
 
   // recent
-  sectionLabel: { letterSpacing: 1, marginTop: Spacing.one },
+  recentHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: Spacing.one,
+  },
+  sectionLabel: { letterSpacing: 1 },
   empty: { paddingVertical: Spacing.four, textAlign: 'center' },
   dayGroup: { gap: Spacing.two },
   dayHead: {

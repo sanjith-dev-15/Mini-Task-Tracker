@@ -171,6 +171,40 @@ export function sumAmount(list: Expense[]): number {
   return list.reduce((acc, e) => acc + e.amount, 0);
 }
 
+/** Midnight (local) of the given day, as epoch ms. Defaults to today. */
+export function startOfDay(d: number | Date = Date.now()): number {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  return x.getTime();
+}
+
+/** Stable per-day key (midnight ms as string). */
+export function dayKey(ts: number): string {
+  return String(startOfDay(ts));
+}
+
+/** `dayKey → total spent that day` — for the calendar's intensity dots. */
+export function spendByDay(list: Expense[]): Map<string, number> {
+  const m = new Map<string, number>();
+  for (const e of list) {
+    const k = dayKey(e.spentAt);
+    m.set(k, (m.get(k) ?? 0) + e.amount);
+  }
+  return m;
+}
+
+/** "Sat, 30 Aug" / "Sat, 30 Aug 2027" — a full day label for a picked date. */
+export function fullDayLabel(ts: number): string {
+  const d = new Date(ts);
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return d.toLocaleDateString('en-GB', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    ...(sameYear ? {} : { year: 'numeric' }),
+  });
+}
+
 export type CategoryTotal = { key: CategoryKey; total: number };
 
 /** Per-category totals, biggest first, zero-spend categories dropped. */

@@ -6,20 +6,20 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GlassIconButton } from '@/components/glass-icon-button';
 import { GlassSurface } from '@/components/glass-surface';
+import { MonthCalendar } from '@/components/month-calendar';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { CATEGORIES, categoryOf, type CategoryKey } from '@/lib/expense-categories';
-import { useExpenses } from '@/lib/expenses';
+import { fullDayLabel, startOfDay, useExpenses } from '@/lib/expenses';
 
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '0', 'back'] as const;
+const DAY_MS = 86_400_000;
 
-function startOfDay(offsetDays = 0): number {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() + offsetDays);
-  return d.getTime();
+/** Midnight `offsetDays` from today. */
+function dayFromToday(offsetDays = 0): number {
+  return startOfDay(startOfDay() + offsetDays * DAY_MS);
 }
 
 /** Group the integer part (Indian style) while the user is still typing. */
@@ -47,7 +47,10 @@ export default function ExpenseFormScreen() {
   );
   const [category, setCategory] = useState<CategoryKey>(() => existing?.category ?? 'food');
   const [title, setTitle] = useState(() => existing?.title ?? '');
-  const [spentAt, setSpentAt] = useState(() => existing?.spentAt ?? startOfDay());
+  const [spentAt, setSpentAt] = useState(() =>
+    existing ? startOfDay(existing.spentAt) : dayFromToday(),
+  );
+  const [showCal, setShowCal] = useState(false);
 
   const amount = parseFloat(amountStr || '0') || 0;
   const canSave = amount > 0;
@@ -96,8 +99,9 @@ export default function ExpenseFormScreen() {
       },
     ]);
 
-  const isToday = spentAt === startOfDay();
-  const isYesterday = spentAt === startOfDay(-1);
+  const isToday = spentAt === dayFromToday();
+  const isYesterday = spentAt === dayFromToday(-1);
+  const showDateLabel = !isToday && !isYesterday;
 
   return (
     <ThemedView style={styles.screen}>
@@ -181,25 +185,52 @@ export default function ExpenseFormScreen() {
         <View style={styles.dateRow}>
           {(
             [
-              ['Today', isToday, () => setSpentAt(startOfDay())],
-              ['Yesterday', isYesterday, () => setSpentAt(startOfDay(-1))],
+              ['Today', isToday && !showCal, () => { setSpentAt(dayFromToday()); setShowCal(false); }],
+              ['Yesterday', isYesterday && !showCal, () => { setSpentAt(dayFromToday(-1)); setShowCal(false); }],
+              [
+                showDateLabel ? fullDayLabel(spentAt) : 'Pick date',
+                showCal || showDateLabel,
+                () => setShowCal((v) => !v),
+              ],
             ] as const
-          ).map(([label, active, onPress]) => (
+          ).map(([label, active, onPress], i) => (
             <Pressable
-              key={label}
+              key={i}
               onPress={onPress}
               style={[
                 styles.dateChip,
-                {
-                  backgroundColor: active ? theme.accent : theme.backgroundElement,
-                },
+                { backgroundColor: active ? theme.accent : theme.backgroundElement },
               ]}>
-              <ThemedText type="smallBold" style={{ color: active ? '#fff' : theme.textSecondary }}>
+              {i === 2 && (
+                <Ionicons
+                  name="calendar-outline"
+                  size={13}
+                  color={active ? '#fff' : theme.textSecondary}
+                  style={styles.dateChipIcon}
+                />
+              )}
+              <ThemedText
+                type="smallBold"
+                numberOfLines={1}
+                style={{ color: active ? '#fff' : theme.textSecondary }}>
                 {label}
               </ThemedText>
             </Pressable>
           ))}
         </View>
+
+        {showCal && (
+          <GlassSurface style={styles.calendar}>
+            <MonthCalendar
+              maxToday
+              selected={spentAt}
+              onSelect={(ts) => {
+                setSpentAt(ts);
+                setShowCal(false);
+              }}
+            />
+          </GlassSurface>
+        )}
       </ScrollView>
 
       <View style={[styles.footer, { paddingBottom: insets.bottom + Spacing.two }]}>
@@ -299,11 +330,15 @@ const styles = StyleSheet.create({
   dateRow: { flexDirection: 'row', gap: Spacing.two },
   dateChip: {
     flex: 1,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     height: 38,
     borderRadius: 10,
+    paddingHorizontal: Spacing.two,
   },
+  dateChipIcon: { marginRight: 4 },
+  calendar: { padding: Spacing.three },
 
   footer: {
     paddingHorizontal: Spacing.three,
