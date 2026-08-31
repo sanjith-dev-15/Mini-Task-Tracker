@@ -38,7 +38,8 @@
         {
           "locationAlwaysAndWhenInUsePermission": "Allow Goku to use your location to center the map and pin reminders."
         }
-      ]
+      ],
+      "./plugins/withReleaseSigning"
     ],
     "experiments": {
       "typedRoutes": true,
