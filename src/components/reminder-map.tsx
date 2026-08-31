@@ -7,12 +7,13 @@ import {
   Marker,
   UserLocation,
 } from '@maplibre/maplibre-react-native';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Keyboard,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   TextInput,
   View,
@@ -41,6 +42,35 @@ const DEFAULT_ZOOM = 3.5;
 const PIN_ZOOM = 13;
 
 export type LatLng = { lat: number; lng: number };
+
+/** One row in the search autocomplete list. */
+type Suggestion = {
+  key: string;
+  /** Primary line — the place name. */
+  label: string;
+  /** Secondary line — street / city / region. */
+  sub: string;
+  lat: number;
+  lng: number;
+};
+
+/**
+ * Photon (photon.komoot.io) — OpenStreetMap geocoder built for type-ahead
+ * search. Free, no API key. `lat`/`lon` bias results toward the map centre.
+ */
+const PHOTON_URL = 'https://photon.komoot.io/api/';
+
+/** Turn a Photon feature's properties into the two label lines. */
+function describePlace(p: Record<string, unknown>): { label: string; sub: string } {
+  const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+  const label =
+    str(p.name) ?? str(p.street) ?? str(p.city) ?? str(p.state) ?? str(p.country) ?? 'Unknown place';
+  const sub = [str(p.street), str(p.city), str(p.state), str(p.country)]
+    .filter((x): x is string => x != null && x !== label)
+    .filter((x, i, a) => a.indexOf(x) === i)
+    .join(', ');
+  return { label, sub };
+}
 
 type Props = {
   reminders: Reminder[];
@@ -73,9 +103,23 @@ export function ReminderMap({
   const [locating, setLocating] = useState(false);
 
   const [query, setQuery] = useState('');
+  const [results, setResults] = useState<Suggestion[]>([]);
   const [searching, setSearching] = useState(false);
   const [notFound, setNotFound] = useState(false);
   const [spot, setSpot] = useState<ReminderLocation | null>(null);
+
+  /** Last known map centre `[lng, lat]`, used to bias search results. */
+  const centerRef = useRef<[number, number] | null>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Monotonic id so a slow response from an earlier keystroke is ignored. */
+  const reqRef = useRef(0);
+
+  useEffect(
+    () => () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    },
+    [],
+  );
 
   // Keep the bottom search bar above the keyboard when it opens.
   const kb = useAnimatedKeyboard();
@@ -126,50 +170,92 @@ export function ReminderMap({
     }
   };
 
-  const runSearch = async () => {
-    const q = query.trim();
-    if (!q || searching) return;
-    Keyboard.dismiss();
+  const fetchSuggestions = async (q: string) => {
+    const reqId = ++reqRef.current;
     setSearching(true);
-    setNotFound(false);
     try {
-      // Nominatim (OpenStreetMap) — free, no key, better results than the
-      // Android platform geocoder. Policy: identify the app, keep it light.
+      const bias = centerRef.current ?? initialViewState.center;
       const url =
-        'https://nominatim.openstreetmap.org/search?format=json&limit=1&q=' +
-        encodeURIComponent(q);
-      const res = await fetch(url, {
-        headers: { 'User-Agent': 'GokuRemindersApp/1.0 (personal use)' },
-      });
-      const data: { lat: string; lon: string; display_name?: string }[] = await res.json();
-      const hit = data[0];
-      if (!hit) {
-        setNotFound(true);
-        setSpot(null);
-        return;
-      }
-      const found: ReminderLocation = {
-        lat: parseFloat(hit.lat),
-        lng: parseFloat(hit.lon),
-        label: hit.display_name?.split(',').slice(0, 3).join(',').trim() || q,
-      };
-      setSpot(found);
-      cameraRef.current?.easeTo({
-        center: [found.lng, found.lat],
-        zoom: PIN_ZOOM,
-        duration: 800,
-      });
+        PHOTON_URL +
+        '?limit=5&lang=en&q=' +
+        encodeURIComponent(q) +
+        (bias ? `&lon=${bias[0]}&lat=${bias[1]}` : '');
+      const res = await fetch(url);
+      const data: { features?: GeoJSON.Feature[] } = await res.json();
+      if (reqId !== reqRef.current) return; // a newer keystroke superseded this
+      const next: Suggestion[] = (data.features ?? [])
+        .map((f, i): Suggestion | null => {
+          const c = (f.geometry as GeoJSON.Point | undefined)?.coordinates;
+          if (!Array.isArray(c) || c.length < 2) return null;
+          const { label, sub } = describePlace((f.properties ?? {}) as Record<string, unknown>);
+          return { key: `${(f.properties as { osm_id?: number })?.osm_id ?? 'x'}-${i}`, label, sub, lng: c[0], lat: c[1] };
+        })
+        .filter((s): s is Suggestion => s != null);
+      setResults(next);
+      setNotFound(next.length === 0);
     } catch {
-      setNotFound(true);
+      if (reqId === reqRef.current) {
+        setResults([]);
+        setNotFound(true);
+      }
     } finally {
-      setSearching(false);
+      if (reqId === reqRef.current) setSearching(false);
     }
   };
 
+  const onQueryChange = (t: string) => {
+    setQuery(t);
+    setNotFound(false);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    const q = t.trim();
+    if (q.length < 3) {
+      setResults([]);
+      setSearching(false);
+      return;
+    }
+    debounceRef.current = setTimeout(() => fetchSuggestions(q), 300);
+  };
+
+  const selectSuggestion = (s: Suggestion) => {
+    Keyboard.dismiss();
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    reqRef.current++; // drop any in-flight response
+    setResults([]);
+    setSearching(false);
+    setNotFound(false);
+    setQuery(s.label);
+    const found: ReminderLocation = {
+      lat: s.lat,
+      lng: s.lng,
+      label: s.sub ? `${s.label}, ${s.sub}` : s.label,
+    };
+    setSpot(found);
+    cameraRef.current?.easeTo({
+      center: [found.lng, found.lat],
+      zoom: PIN_ZOOM,
+      duration: 800,
+    });
+  };
+
+  const submitSearch = () => {
+    if (results.length > 0) {
+      selectSuggestion(results[0]);
+      return;
+    }
+    const q = query.trim();
+    if (q.length < 3) return;
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    fetchSuggestions(q);
+  };
+
   const clearSearch = () => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    reqRef.current++;
     setQuery('');
+    setResults([]);
     setSpot(null);
     setNotFound(false);
+    setSearching(false);
   };
 
   const locateButton = (
@@ -193,11 +279,8 @@ export function ReminderMap({
       <Ionicons name="search" size={17} color={colors.textSecondary} />
       <TextInput
         value={query}
-        onChangeText={(t) => {
-          setQuery(t);
-          if (notFound) setNotFound(false);
-        }}
-        onSubmitEditing={runSearch}
+        onChangeText={onQueryChange}
+        onSubmitEditing={submitSearch}
         placeholder="Search a place or address"
         placeholderTextColor={colors.textSecondary}
         style={[styles.searchInput, { color: colors.text }]}
@@ -214,6 +297,35 @@ export function ReminderMap({
     </View>
   );
 
+  const resultsList = results.length > 0 && (
+    <View style={[styles.results, { backgroundColor: colors.card, borderColor: colors.border }]}>
+      <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+        {results.map((s, i) => (
+          <Pressable
+            key={s.key}
+            onPress={() => selectSuggestion(s)}
+            style={({ pressed }) => [
+              styles.resultRow,
+              i > 0 && { borderTopColor: colors.border, borderTopWidth: StyleSheet.hairlineWidth },
+              pressed && { backgroundColor: colors.backgroundElement },
+            ]}>
+            <Ionicons name="location-outline" size={16} color={colors.textSecondary} />
+            <View style={styles.resultText}>
+              <ThemedText type="small" numberOfLines={1}>
+                {s.label}
+              </ThemedText>
+              {s.sub ? (
+                <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
+                  {s.sub}
+                </ThemedText>
+              ) : null}
+            </View>
+          </Pressable>
+        ))}
+      </ScrollView>
+    </View>
+  );
+
   return (
     <View
       style={[
@@ -227,6 +339,10 @@ export function ReminderMap({
         logo={false}
         attributionPosition={searchable ? { top: 8, right: 8 } : { bottom: 6, left: 6 }}
         onPress={() => Keyboard.dismiss()}
+        onRegionDidChange={(e) => {
+          const c = e.nativeEvent.center;
+          if (Array.isArray(c) && c.length >= 2) centerRef.current = [c[0], c[1]];
+        }}
         onLongPress={(e) => {
           const [lng, lat] = e.nativeEvent.lngLat;
           onLongPressMap({ lat, lng });
@@ -339,6 +455,7 @@ export function ReminderMap({
               </View>
             )}
 
+            {resultsList}
             {searchBox}
           </View>
           {locateButton}
@@ -416,6 +533,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
   },
   searchInput: { flex: 1, fontSize: 15, height: '100%' },
+  results: {
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    overflow: 'hidden',
+    maxHeight: 220,
+  },
+  resultRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  resultText: { flex: 1 },
   hint: {
     alignSelf: 'flex-start',
     borderRadius: 10,
