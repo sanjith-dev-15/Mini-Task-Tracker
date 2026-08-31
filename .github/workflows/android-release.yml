@@ -64,23 +64,25 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Set Android versionCode to run number
+        run: |
+          node -e '
+            const fs = require("fs");
+            const p = "app.json";
+            const j = JSON.parse(fs.readFileSync(p, "utf8"));
+            j.expo.android = j.expo.android || {};
+            j.expo.android.versionCode = Number(process.env.GITHUB_RUN_NUMBER);
+            fs.writeFileSync(p, JSON.stringify(j, null, 2) + "\n");
+            console.log("expo.android.versionCode =", j.expo.android.versionCode);
+          '
+
       - name: Expo prebuild (Android)
         run: npx expo prebuild --platform android --no-install --clean
         env:
           EXPO_NO_TELEMETRY: "1"
 
-      - name: Set versionCode to run number
-        run: |
-          node -e '
-            const fs = require("fs");
-            const f = "android/app/build.gradle";
-            const code = process.env.GITHUB_RUN_NUMBER;
-            let s = fs.readFileSync(f, "utf8");
-            const next = s.replace(/versionCode\s+\d+/, `versionCode ${code}`);
-            if (next === s) { console.error("versionCode line not found"); process.exit(1); }
-            fs.writeFileSync(f, next);
-            console.log("versionCode ->", code);
-          '
+      - name: Show generated version
+        run: grep -nE "versionCode|versionName" android/app/build.gradle
 
       - name: Decode release keystore
         run: |
