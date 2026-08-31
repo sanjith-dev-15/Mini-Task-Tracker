@@ -46,9 +46,15 @@ const ITEMS: NavItem[] = [
 
 const SPRING = { duration: 300, easing: Easing.out(Easing.cubic) };
 
+// <GlassNav> is rendered per-screen (inside the drawer's screenLayout, so the
+// sidebar scrim covers it). These module-level caches let the sliding chip carry
+// its position across those per-screen remounts.
+const layoutCache: Record<string, LayoutRectangle> = {};
+let lastChip: { x: number; w: number } | null = null;
+
 /**
- * Global floating pill navigation. Rendered once in the root layout so it shows
- * on every screen. Liquid glass on iOS 26+, translucent pill elsewhere.
+ * Global floating pill navigation. Liquid glass on iOS 26+, translucent pill
+ * elsewhere.
  *
  * The active tab sits inside its own rounded glass capsule that slides
  * smoothly to whichever tab you switch to — a second glass layer on iOS 26
@@ -64,26 +70,31 @@ export function GlassNav() {
   const chipBg = isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.05)';
   const chipBorder = isDark ? 'rgba(255,255,255,0.20)' : 'rgba(0,0,0,0.10)';
 
-  const [layouts, setLayouts] = useState<Record<string, LayoutRectangle>>({});
+  const [layouts, setLayouts] = useState<Record<string, LayoutRectangle>>(() => ({
+    ...layoutCache,
+  }));
   const activeRoute = ITEMS.find((i) => i.match(pathname))?.route;
   const activeLayout = activeRoute ? layouts[activeRoute] : undefined;
 
-  const x = useSharedValue(0);
-  const w = useSharedValue(0);
-  const shown = useSharedValue(0);
-  const first = useRef(true);
+  const x = useSharedValue(lastChip?.x ?? 0);
+  const w = useSharedValue(lastChip?.w ?? 0);
+  const shown = useSharedValue(lastChip ? 1 : 0);
+  const seeded = useRef(false);
 
   useEffect(() => {
     if (!activeLayout) return;
-    if (first.current) {
-      x.value = activeLayout.x;
-      w.value = activeLayout.width;
+    if (!seeded.current) {
+      seeded.current = true;
+      if (lastChip == null) {
+        // First ever mount — snap into place.
+        x.value = activeLayout.x;
+        w.value = activeLayout.width;
+      }
       shown.value = withTiming(1, { duration: 150 });
-      first.current = false;
-    } else {
-      x.value = withTiming(activeLayout.x, SPRING);
-      w.value = withTiming(activeLayout.width, SPRING);
     }
+    x.value = withTiming(activeLayout.x, SPRING);
+    w.value = withTiming(activeLayout.width, SPRING);
+    lastChip = { x: activeLayout.x, w: activeLayout.width };
   }, [activeLayout, w, x, shown]);
 
   const chipStyle = useAnimatedStyle(() => ({
@@ -94,6 +105,7 @@ export function GlassNav() {
 
   const onItemLayout = (route: string) => (e: { nativeEvent: { layout: LayoutRectangle } }) => {
     const l = e.nativeEvent.layout;
+    layoutCache[route] = l;
     setLayouts((prev) => {
       const cur = prev[route];
       if (cur && cur.x === l.x && cur.y === l.y && cur.width === l.width && cur.height === l.height) {
@@ -103,8 +115,16 @@ export function GlassNav() {
     });
   };
 
-  // Full-screen map / the add-expense sheet own the whole screen — no nav there.
-  if (pathname === '/map' || pathname === '/expenses/new') return null;
+  // Hidden where a screen owns the whole view or has its own back nav: the
+  // full-screen map, the add-expense sheet, every Settings sub-page. (Rendered
+  // inside the drawer's screen layer, so the drawer scrim covers it when open.)
+  if (
+    pathname === '/map' ||
+    pathname === '/expenses/new' ||
+    pathname.startsWith('/settings/')
+  ) {
+    return null;
+  }
 
   return (
     <View style={[styles.wrap, { paddingBottom: insets.bottom + 10 }]} pointerEvents="box-none">

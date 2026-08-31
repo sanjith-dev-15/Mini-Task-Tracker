@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { DrawerToggleButton } from 'expo-router/drawer';
 import { useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GlassSurface } from '@/components/glass-surface';
@@ -52,9 +52,12 @@ export default function ExpensesScreen() {
   const dayMap = useMemo(() => spendByDay(expenses), [expenses]);
 
   const [focusedDay, setFocusedDay] = useState<number | null>(null);
+  const [showCal, setShowCal] = useState(false);
   const groups = focusedDay
     ? allGroups.filter((g) => g.key === String(focusedDay))
     : allGroups;
+
+  const fabBottom = insets.bottom + Spacing.six + Spacing.three;
 
   const openNew = () => router.push('/expenses/new');
   const openEdit = (id: string) =>
@@ -162,19 +165,6 @@ export default function ExpensesScreen() {
           )}
         </GlassSurface>
 
-        {/* ---------- calendar ---------- */}
-        <GlassSurface style={styles.card}>
-          <ThemedText type="smallBold" themeColor="textSecondary" style={styles.cardTitle}>
-            BY DAY
-          </ThemedText>
-          <MonthCalendar
-            maxToday
-            selected={focusedDay}
-            spendByDay={dayMap}
-            onSelect={(ts) => setFocusedDay((cur) => (cur === ts ? null : ts))}
-          />
-        </GlassSurface>
-
         {/* ---------- recent ---------- */}
         <View style={styles.recentHead}>
           <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
@@ -224,18 +214,73 @@ export default function ExpensesScreen() {
       </ScrollView>
 
       <Pressable
+        accessibilityLabel={focusedDay ? 'Change the day shown' : 'Jump to a day'}
+        onPress={() => setShowCal(true)}
+        style={({ pressed }) => [
+          styles.calBtn,
+          {
+            backgroundColor: focusedDay ? theme.accent : theme.card,
+            borderColor: theme.border,
+            bottom: fabBottom + 56 + Spacing.two,
+            opacity: pressed ? 0.8 : 1,
+          },
+        ]}>
+        <Ionicons
+          name={focusedDay ? 'calendar' : 'calendar-outline'}
+          size={20}
+          color={focusedDay ? '#fff' : theme.accent}
+        />
+      </Pressable>
+
+      <Pressable
         accessibilityLabel="Add expense"
         onPress={openNew}
         style={({ pressed }) => [
           styles.fab,
-          {
-            backgroundColor: theme.accent,
-            bottom: insets.bottom + Spacing.six + Spacing.three,
-            opacity: pressed ? 0.85 : 1,
-          },
+          { backgroundColor: theme.accent, bottom: fabBottom, opacity: pressed ? 0.85 : 1 },
         ]}>
         <Ionicons name="add" size={30} color="#fff" />
       </Pressable>
+
+      <Modal
+        visible={showCal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowCal(false)}>
+        <Pressable style={styles.modalScrim} onPress={() => setShowCal(false)}>
+          <Pressable
+            style={[styles.modalCard, { backgroundColor: theme.card, borderColor: theme.border }]}
+            onPress={() => {}}>
+            <View style={styles.modalHead}>
+              <ThemedText type="subtitle">Jump to a day</ThemedText>
+              <Pressable onPress={() => setShowCal(false)} hitSlop={8}>
+                <Ionicons name="close" size={22} color={theme.textSecondary} />
+              </Pressable>
+            </View>
+            <MonthCalendar
+              maxToday
+              selected={focusedDay}
+              spendByDay={dayMap}
+              onSelect={(ts) => {
+                setFocusedDay((cur) => (cur === ts ? null : ts));
+                setShowCal(false);
+              }}
+            />
+            {focusedDay && (
+              <Pressable
+                onPress={() => {
+                  setFocusedDay(null);
+                  setShowCal(false);
+                }}
+                style={styles.modalClear}>
+                <ThemedText type="smallBold" style={{ color: theme.accent }}>
+                  Show all days
+                </ThemedText>
+              </Pressable>
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
     </ThemedView>
   );
 }
@@ -397,4 +442,41 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     elevation: 6,
   },
+  calBtn: {
+    position: 'absolute',
+    right: Spacing.four + 4,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 5,
+  },
+  modalScrim: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: Spacing.four,
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 400,
+    borderRadius: 20,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: Spacing.four,
+    gap: Spacing.two,
+  },
+  modalHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: Spacing.one,
+  },
+  modalClear: { alignSelf: 'center', paddingTop: Spacing.two },
 });
