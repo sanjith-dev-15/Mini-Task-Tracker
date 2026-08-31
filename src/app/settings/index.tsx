@@ -9,7 +9,6 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { folderLabel, useScans } from '@/lib/scans';
 import { useThemeContext } from '@/lib/theme';
 
 const MODE_LABEL: Record<string, string> = {
@@ -21,7 +20,6 @@ const MODE_LABEL: Record<string, string> = {
 export default function SettingsIndex() {
   const theme = useTheme();
   const { mode } = useThemeContext();
-  const { saveDir } = useScans();
   const insets = useSafeAreaInsets();
 
   const appName = Constants.expoConfig?.name ?? 'App';
@@ -47,13 +45,6 @@ export default function SettingsIndex() {
             icon="shield-checkmark-outline"
             label="Permissions"
             onPress={() => router.push('/settings/permissions')}
-            divider
-          />
-          <NavRow
-            icon="folder-outline"
-            label="Scan storage"
-            value={folderLabel(saveDir) ?? 'In app only'}
-            onPress={() => router.push('/settings/storage')}
             divider
           />
         </View>
