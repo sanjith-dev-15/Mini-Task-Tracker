@@ -8,7 +8,7 @@ import {
 } from 'expo-router/drawer';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -17,8 +17,10 @@ import { AnimatedSplash } from '@/components/animated-splash';
 import { GlassNav } from '@/components/glass-nav';
 import { Spacing } from '@/constants/theme';
 import { ExpensesProvider } from '@/lib/expenses';
+// Registers the geofencing background task + notification handler at module load.
+import { syncGeofences } from '@/lib/geofencing';
 import { NotesProvider } from '@/lib/notes';
-import { RemindersProvider } from '@/lib/reminders';
+import { RemindersProvider, useReminders } from '@/lib/reminders';
 import { ThemeProvider, useThemeContext } from '@/lib/theme';
 
 // Keep the native splash up until <AnimatedSplash> takes over.
@@ -45,6 +47,7 @@ export default function RootLayout() {
           <NotesProvider>
             <RemindersProvider>
               <ExpensesProvider>
+                <GeofenceSync />
                 <ThemedRoot />
               </ExpensesProvider>
             </RemindersProvider>
@@ -54,6 +57,15 @@ export default function RootLayout() {
       {!splashDone && <AnimatedSplash onFinish={() => setSplashDone(true)} />}
     </GestureHandlerRootView>
   );
+}
+
+/** Keeps the registered geofences in step with located reminders. */
+function GeofenceSync() {
+  const { reminders } = useReminders();
+  useEffect(() => {
+    syncGeofences(reminders).catch(() => {});
+  }, [reminders]);
+  return null;
 }
 
 function ThemedRoot() {

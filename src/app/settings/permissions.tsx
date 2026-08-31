@@ -4,10 +4,12 @@ import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Linking,
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   View,
 } from 'react-native';
 import Animated, { FadeIn, LinearTransition } from 'react-native-reanimated';
@@ -18,7 +20,15 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import {
+  geofencePermissionState,
+  isGeofencingEnabled,
+  requestGeofencePermissions,
+  setGeofencingEnabled,
+  type GeofenceState,
+} from '@/lib/geofencing';
 import { grantLabel, PERMISSIONS, type PermissionInfo } from '@/lib/permissions';
+import { useReminders } from '@/lib/reminders';
 
 export default function PermissionsScreen() {
   const theme = useTheme();
@@ -46,6 +56,8 @@ export default function PermissionsScreen() {
           leaves your device.
         </ThemedText>
 
+        <LocationRemindersControl />
+
         {PERMISSIONS.map((info) => (
           <PermissionCard
             key={info.key}
@@ -56,6 +68,100 @@ export default function PermissionsScreen() {
         ))}
       </ScrollView>
     </ThemedView>
+  );
+}
+
+const GEO_HINT: Record<GeofenceState, string> = {
+  ready: 'On — you’ll be notified when you reach a located reminder.',
+  'needs-location': 'Needs location access.',
+  'needs-background': 'Android needs the "Allow all the time" location setting — open system settings to change it.',
+  'needs-notifications': 'Needs notification permission.',
+};
+
+/** The one interactive switch on this screen: arm/disarm geofenced reminders. */
+function LocationRemindersControl() {
+  const theme = useTheme();
+  const { reminders } = useReminders();
+  const [enabled, setEnabled] = useState(false);
+  const [state, setState] = useState<GeofenceState>('needs-location');
+  const [busy, setBusy] = useState(false);
+
+  const refresh = useCallback(() => {
+    Promise.all([isGeofencingEnabled(), geofencePermissionState()])
+      .then(([en, st]) => {
+        setEnabled(en);
+        setState(st);
+      })
+      .catch(() => {});
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      refresh();
+    }, [refresh]),
+  );
+
+  const onToggle = async (next: boolean) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      if (next) {
+        const result = await requestGeofencePermissions();
+        setState(result);
+        if (result === 'ready') {
+          await setGeofencingEnabled(true, reminders);
+          setEnabled(true);
+        } else if (result === 'needs-background') {
+          Alert.alert(
+            'One more step',
+            'Set this app’s location access to "Allow all the time" in system settings, then try again.',
+            [
+              { text: 'Not now', style: 'cancel' },
+              { text: 'Open settings', onPress: () => Linking.openSettings() },
+            ],
+          );
+        }
+      } else {
+        await setGeofencingEnabled(false, reminders);
+        setEnabled(false);
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const on = enabled && state === 'ready';
+
+  return (
+    <Animated.View
+      layout={LinearTransition.duration(180)}
+      style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}>
+      <View style={styles.geoHead}>
+        <Ionicons name="notifications-circle-outline" size={22} color={theme.text} />
+        <View style={styles.geoText}>
+          <ThemedText style={styles.cardTitle}>Location reminders</ThemedText>
+          <ThemedText type="small" themeColor="textSecondary">
+            {busy ? 'Working…' : on ? GEO_HINT.ready : enabled ? GEO_HINT[state] : 'Off'}
+          </ThemedText>
+        </View>
+        {busy ? (
+          <ActivityIndicator size="small" color={theme.textSecondary} />
+        ) : (
+          <Switch
+            value={on}
+            onValueChange={onToggle}
+            trackColor={{ true: theme.accent }}
+          />
+        )}
+      </View>
+      {enabled && state !== 'ready' && !busy && (
+        <Pressable onPress={() => Linking.openSettings()} style={styles.geoAction}>
+          <ThemedText type="smallBold" style={{ color: theme.accent }}>
+            Open system settings
+          </ThemedText>
+        </Pressable>
+      )}
+    </Animated.View>
   );
 }
 
@@ -204,6 +310,18 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     borderWidth: StyleSheet.hairlineWidth,
     overflow: 'hidden',
+  },
+  geoHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    padding: Spacing.three,
+  },
+  geoText: { flex: 1, gap: 2 },
+  geoAction: {
+    paddingHorizontal: Spacing.three,
+    paddingBottom: Spacing.three,
+    paddingTop: Spacing.one,
   },
   cardHead: {
     flexDirection: 'row',

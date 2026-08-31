@@ -36,7 +36,15 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "Allow Goku to use your location to center the map and pin reminders."
+          "locationAlwaysAndWhenInUsePermission": "Allow Goku to use your location to center the map, pin reminders, and alert you when you arrive near a located reminder.",
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#F26722"
         }
       ],
       "./plugins/withReleaseSigning"
