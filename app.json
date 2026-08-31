@@ -38,7 +38,9 @@
         {
           "locationAlwaysAndWhenInUsePermission": "Allow Goku to use your location to center the map and pin reminders."
         }
-      ]
+      ],
+      "react-native-document-scanner-plugin",
+      "expo-sharing"
     ],
     "experiments": {
       "typedRoutes": true,

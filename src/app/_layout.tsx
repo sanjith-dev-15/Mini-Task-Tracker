@@ -18,6 +18,7 @@ import { GlassNav } from '@/components/glass-nav';
 import { Spacing } from '@/constants/theme';
 import { NotesProvider } from '@/lib/notes';
 import { RemindersProvider } from '@/lib/reminders';
+import { ScansProvider } from '@/lib/scans';
 import { ThemeProvider, useThemeContext } from '@/lib/theme';
 
 // Keep the native splash up until <AnimatedSplash> takes over.
@@ -43,7 +44,9 @@ export default function RootLayout() {
         <ThemeProvider>
           <NotesProvider>
             <RemindersProvider>
-              <ThemedRoot />
+              <ScansProvider>
+                <ThemedRoot />
+              </ScansProvider>
             </RemindersProvider>
           </NotesProvider>
         </ThemeProvider>
@@ -78,6 +81,10 @@ function ThemedRoot() {
         <Drawer.Screen
           name="map"
           options={{ title: 'Map', drawerItemStyle: { display: 'none' } }}
+        />
+        <Drawer.Screen
+          name="scan"
+          options={{ title: 'Scan', drawerItemStyle: { display: 'none' } }}
         />
       </Drawer>
       <GlassNav />

@@ -20,7 +20,7 @@ import { useThemeContext } from '@/lib/theme';
 
 type NavItem = {
   label: string;
-  route: '/' | '/notes' | '/settings';
+  route: '/' | '/notes' | '/scan';
   match: (pathname: string) => boolean;
   icon: keyof typeof Ionicons.glyphMap;
   iconActive: keyof typeof Ionicons.glyphMap;
@@ -36,11 +36,11 @@ const ITEMS: NavItem[] = [
     iconActive: 'reader',
   },
   {
-    label: 'Settings',
-    route: '/settings',
-    match: (p) => p === '/settings',
-    icon: 'settings-outline',
-    iconActive: 'settings',
+    label: 'Scan',
+    route: '/scan',
+    match: (p) => p.startsWith('/scan'),
+    icon: 'scan-outline',
+    iconActive: 'scan',
   },
 ];
 

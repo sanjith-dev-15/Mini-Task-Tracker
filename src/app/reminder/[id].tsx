@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { GlassIconButton } from '@/components/glass-icon-button';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
@@ -74,12 +75,18 @@ export default function ReminderEditorScreen() {
   return (
     <ThemedView style={styles.screen}>
       <View style={[styles.header, { paddingTop: insets.top + Spacing.one }]}>
-        <Pressable onPress={goHome} hitSlop={12} style={styles.headerBtn}>
-          <ThemedText style={[styles.chevron, { color: theme.accent }]}>‹ Home</ThemedText>
-        </Pressable>
-        <Pressable onPress={confirmDelete} hitSlop={12} style={styles.headerBtn}>
-          <ThemedText style={{ color: theme.danger }}>Delete</ThemedText>
-        </Pressable>
+        <GlassIconButton
+          name="chevron-back"
+          color={theme.text}
+          onPress={goHome}
+          accessibilityLabel="Back to Home"
+        />
+        <GlassIconButton
+          name="trash-outline"
+          color={theme.danger}
+          onPress={confirmDelete}
+          accessibilityLabel="Delete reminder"
+        />
       </View>
 
       <KeyboardAvoidingView
@@ -161,10 +168,9 @@ export default function ReminderEditorScreen() {
             {loc && (
               <Pressable
                 onPress={() => updateReminder(reminder.id, { location: null })}
-                hitSlop={10}>
-                <ThemedText type="small" style={{ color: theme.danger }}>
-                  Remove
-                </ThemedText>
+                hitSlop={10}
+                accessibilityLabel="Remove location">
+                <Ionicons name="close-circle" size={20} color={theme.textSecondary} />
               </Pressable>
             )}
           </View>
@@ -198,8 +204,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
     paddingBottom: Spacing.two,
   },
-  headerBtn: { paddingVertical: Spacing.one },
-  chevron: { fontSize: 17, fontWeight: '500' },
   body: {
     paddingHorizontal: Spacing.three,
     width: '100%',
