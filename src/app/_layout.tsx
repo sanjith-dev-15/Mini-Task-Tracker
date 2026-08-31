@@ -8,7 +8,7 @@ import {
 } from 'expo-router/drawer';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -68,6 +68,20 @@ function GeofenceSync() {
   return null;
 }
 
+/**
+ * Wraps every drawer screen. The floating <GlassNav> lives here (not as a
+ * sibling of <Drawer>) so it sits in the screen layer — the drawer's dim scrim
+ * and panel slide over it when the sidebar opens, instead of it floating on top.
+ */
+function ScreenFrame({ children }: { children: ReactNode }) {
+  return (
+    <View style={styles.screenFrame}>
+      {children}
+      <GlassNav />
+    </View>
+  );
+}
+
 function ThemedRoot() {
   const { scheme, colors } = useThemeContext();
   const isDark = scheme === 'dark';
@@ -78,6 +92,7 @@ function ThemedRoot() {
         drawerContent={(props) => <SidebarContent {...props} />}
         initialRouteName="(tabs)"
         backBehavior="initialRoute"
+        screenLayout={({ children }) => <ScreenFrame>{children}</ScreenFrame>}
         screenOptions={{
           headerShown: false,
           drawerStyle: { backgroundColor: colors.card, width: 260 },
@@ -96,7 +111,6 @@ function ThemedRoot() {
           options={{ title: 'Map', drawerItemStyle: { display: 'none' } }}
         />
       </Drawer>
-      <GlassNav />
       <StatusBar style={isDark ? 'light' : 'dark'} />
     </NavThemeProvider>
   );
@@ -142,6 +156,7 @@ function SidebarContent(props: DrawerContentComponentProps) {
 }
 
 const styles = StyleSheet.create({
+  screenFrame: { flex: 1 },
   drawerContent: { flex: 1 },
   drawerFooter: {
     marginTop: 'auto',

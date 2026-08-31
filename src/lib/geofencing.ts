@@ -87,28 +87,39 @@ export type GeofenceState =
   | 'ready'
   | 'needs-location'
   | 'needs-background'
-  | 'needs-notifications';
+  | 'needs-notifications'
+  /** Native side can't do background geofencing (e.g. app not rebuilt yet). */
+  | 'unavailable';
 
 export async function geofencePermissionState(): Promise<GeofenceState> {
-  const fg = await Location.getForegroundPermissionsAsync();
-  if (!fg.granted) return 'needs-location';
-  const bg = await Location.getBackgroundPermissionsAsync();
-  if (!bg.granted) return 'needs-background';
-  const notif = await Notifications.getPermissionsAsync();
-  if (!notif.granted) return 'needs-notifications';
-  return 'ready';
+  try {
+    const fg = await Location.getForegroundPermissionsAsync();
+    if (!fg.granted) return 'needs-location';
+    const bg = await Location.getBackgroundPermissionsAsync();
+    if (!bg.granted) return 'needs-background';
+    const notif = await Notifications.getPermissionsAsync();
+    if (!notif.granted) return 'needs-notifications';
+    return 'ready';
+  } catch {
+    return 'unavailable';
+  }
 }
 
 /** Walk the permission chain (foreground → background → notifications). */
 export async function requestGeofencePermissions(): Promise<GeofenceState> {
-  const fg = await Location.requestForegroundPermissionsAsync();
-  if (!fg.granted) return 'needs-location';
-  const bg = await Location.requestBackgroundPermissionsAsync();
-  if (!bg.granted) return 'needs-background';
-  const notif = await Notifications.requestPermissionsAsync();
-  if (!notif.granted) return 'needs-notifications';
-  await ensureChannel();
-  return 'ready';
+  try {
+    const fg = await Location.requestForegroundPermissionsAsync();
+    if (!fg.granted) return 'needs-location';
+    const bg = await Location.requestBackgroundPermissionsAsync();
+    if (!bg.granted) return 'needs-background';
+    const notif = await Notifications.requestPermissionsAsync();
+    if (!notif.granted) return 'needs-notifications';
+    await ensureChannel();
+    return 'ready';
+  } catch (e) {
+    console.warn('requestGeofencePermissions failed', e);
+    return 'unavailable';
+  }
 }
 
 /* ------------------------------------------------------------- enable flag */
