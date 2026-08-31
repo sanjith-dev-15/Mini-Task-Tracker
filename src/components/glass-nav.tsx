@@ -20,7 +20,7 @@ import { useThemeContext } from '@/lib/theme';
 
 type NavItem = {
   label: string;
-  route: '/' | '/notes';
+  route: '/' | '/notes' | '/expenses';
   match: (pathname: string) => boolean;
   icon: keyof typeof Ionicons.glyphMap;
   iconActive: keyof typeof Ionicons.glyphMap;
@@ -34,6 +34,13 @@ const ITEMS: NavItem[] = [
     match: (p) => p.startsWith('/notes'),
     icon: 'reader-outline',
     iconActive: 'reader',
+  },
+  {
+    label: 'Expenses',
+    route: '/expenses',
+    match: (p) => p.startsWith('/expenses'),
+    icon: 'wallet-outline',
+    iconActive: 'wallet',
   },
 ];
 
@@ -96,8 +103,8 @@ export function GlassNav() {
     });
   };
 
-  // Full-screen map owns the whole screen — no floating nav there.
-  if (pathname === '/map') return null;
+  // Full-screen map / the add-expense sheet own the whole screen — no nav there.
+  if (pathname === '/map' || pathname === '/expenses/new') return null;
 
   return (
     <View style={[styles.wrap, { paddingBottom: insets.bottom + 10 }]} pointerEvents="box-none">

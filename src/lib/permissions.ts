@@ -35,13 +35,34 @@ export const PERMISSIONS: PermissionInfo[] = [
     optional: true,
   },
   {
+    key: 'background-location',
+    title: 'Background location',
+    icon: 'navigate-outline',
+    android: ['ACCESS_BACKGROUND_LOCATION'],
+    purpose: 'Notify you when you arrive near a reminder you pinned to a place.',
+    detail:
+      'Only used for location reminders, and only if you turn them on below. Uses low-power geofencing — no continuous GPS. Requires the "Allow all the time" setting. Your location is never stored or sent anywhere.',
+    grant: 'runtime',
+    optional: true,
+  },
+  {
+    key: 'notifications',
+    title: 'Notifications',
+    icon: 'notifications-outline',
+    android: ['POST_NOTIFICATIONS'],
+    purpose: 'Show the alert when you reach a located reminder.',
+    detail: 'The only notifications this app sends. Nothing else is pushed to you.',
+    grant: 'runtime',
+    optional: true,
+  },
+  {
     key: 'network',
     title: 'Network access',
     icon: 'wifi-outline',
     android: ['INTERNET', 'ACCESS_NETWORK_STATE'],
-    purpose: 'Download map tiles from OpenFreeMap.',
+    purpose: 'Download map tiles from OpenFreeMap and look up places you search.',
     detail:
-      'Your notes, reminders and tasks live only on this device — there is no account, no server and no sync.',
+      'Your notes, reminders, expenses and tasks live only on this device — there is no account, no server and no sync.',
     grant: 'install',
   },
   {

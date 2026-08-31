@@ -8,7 +8,7 @@ import {
 } from 'expo-router/drawer';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -16,8 +16,11 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AnimatedSplash } from '@/components/animated-splash';
 import { GlassNav } from '@/components/glass-nav';
 import { Spacing } from '@/constants/theme';
+import { ExpensesProvider } from '@/lib/expenses';
+// Registers the geofencing background task + notification handler at module load.
+import { syncGeofences } from '@/lib/geofencing';
 import { NotesProvider } from '@/lib/notes';
-import { RemindersProvider } from '@/lib/reminders';
+import { RemindersProvider, useReminders } from '@/lib/reminders';
 import { ThemeProvider, useThemeContext } from '@/lib/theme';
 
 // Keep the native splash up until <AnimatedSplash> takes over.
@@ -43,7 +46,10 @@ export default function RootLayout() {
         <ThemeProvider>
           <NotesProvider>
             <RemindersProvider>
-              <ThemedRoot />
+              <ExpensesProvider>
+                <GeofenceSync />
+                <ThemedRoot />
+              </ExpensesProvider>
             </RemindersProvider>
           </NotesProvider>
         </ThemeProvider>
@@ -51,6 +57,15 @@ export default function RootLayout() {
       {!splashDone && <AnimatedSplash onFinish={() => setSplashDone(true)} />}
     </GestureHandlerRootView>
   );
+}
+
+/** Keeps the registered geofences in step with located reminders. */
+function GeofenceSync() {
+  const { reminders } = useReminders();
+  useEffect(() => {
+    syncGeofences(reminders).catch(() => {});
+  }, [reminders]);
+  return null;
 }
 
 function ThemedRoot() {
@@ -70,6 +85,7 @@ function ThemedRoot() {
         }}>
         <Drawer.Screen name="notes" options={{ title: 'Notes' }} />
         <Drawer.Screen name="(tabs)" options={{ title: 'Mini Task Tracker' }} />
+        <Drawer.Screen name="expenses" options={{ title: 'Expenses' }} />
         <Drawer.Screen name="settings" options={{ title: 'Settings' }} />
         <Drawer.Screen
           name="reminder"
@@ -93,6 +109,7 @@ const SIDEBAR_ITEMS: {
 }[] = [
   { name: 'notes', label: 'Notes', icon: 'document-text-outline' },
   { name: '(tabs)', label: 'Mini Task Tracker', icon: 'checkbox-outline' },
+  { name: 'expenses', label: 'Expenses', icon: 'wallet-outline' },
 ];
 
 function SidebarContent(props: DrawerContentComponentProps) {

@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router, useLocalSearchParams } from 'expo-router';
-import { useCallback, useEffect, useRef } from 'react';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
@@ -18,6 +18,13 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import {
+  DEFAULT_RADIUS,
+  geofencePermissionState,
+  isGeofencingEnabled,
+  RADIUS_OPTIONS,
+  radiusLabel,
+} from '@/lib/geofencing';
 import { activeChipKey, DUE_CHIPS } from '@/lib/reminder-dates';
 import { isBlankReminder, useReminders, type Reminder } from '@/lib/reminders';
 
@@ -40,6 +47,20 @@ export default function ReminderEditorScreen() {
       if (current && isBlankReminder(current)) deleteReminder(current.id);
     };
   }, [deleteReminder]);
+
+  // Whether "location reminders" is actually armed (toggle on + all perms).
+  const [geoActive, setGeoActive] = useState(false);
+  useFocusEffect(
+    useCallback(() => {
+      let alive = true;
+      Promise.all([isGeofencingEnabled(), geofencePermissionState()])
+        .then(([enabled, state]) => alive && setGeoActive(enabled && state === 'ready'))
+        .catch(() => {});
+      return () => {
+        alive = false;
+      };
+    }, []),
+  );
 
   // Close the editor and land on the Home tab, wherever we were opened from.
   const goHome = useCallback(() => router.replace('/'), []);
@@ -175,6 +196,51 @@ export default function ReminderEditorScreen() {
             )}
           </View>
 
+          {loc && (
+            <>
+              <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
+                NUDGE ME WITHIN
+              </ThemedText>
+              <View style={styles.chips}>
+                {RADIUS_OPTIONS.map((m) => {
+                  const active = (loc.radius ?? DEFAULT_RADIUS) === m;
+                  return (
+                    <Pressable
+                      key={m}
+                      onPress={() => updateReminder(reminder.id, { location: { ...loc, radius: m } })}
+                      style={[
+                        styles.chip,
+                        {
+                          backgroundColor: active ? theme.accent : theme.backgroundElement,
+                          borderColor: active ? theme.accent : theme.border,
+                        },
+                      ]}>
+                      <ThemedText
+                        type="smallBold"
+                        style={{ color: active ? '#fff' : theme.textSecondary }}>
+                        {radiusLabel(m)}
+                      </ThemedText>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              <Pressable
+                onPress={() => router.push('/settings/permissions')}
+                style={styles.geoHint}>
+                <Ionicons
+                  name={geoActive ? 'notifications' : 'notifications-off-outline'}
+                  size={14}
+                  color={geoActive ? theme.accent : theme.textSecondary}
+                />
+                <ThemedText type="small" themeColor="textSecondary" style={styles.flex}>
+                  {geoActive
+                    ? `You'll get a notification when you arrive here.`
+                    : `Turn on location reminders to be notified here →`}
+                </ThemedText>
+              </Pressable>
+            </>
+          )}
+
           <View style={[styles.divider, { backgroundColor: theme.border }]} />
 
           <TextInput
@@ -239,6 +305,13 @@ const styles = StyleSheet.create({
     gap: Spacing.two,
     borderRadius: 12,
     padding: Spacing.three,
+  },
+  geoHint: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    marginTop: Spacing.two,
+    paddingHorizontal: Spacing.one,
   },
   divider: { height: StyleSheet.hairlineWidth, marginVertical: Spacing.four },
   notesInput: { fontSize: 16, lineHeight: 24, minHeight: 120 },

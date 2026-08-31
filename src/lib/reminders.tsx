@@ -19,6 +19,8 @@ export type ReminderLocation = {
   lng: number;
   /** Optional human-readable label (e.g. from reverse geocoding). */
   label?: string;
+  /** Geofence trigger radius in metres (defaults to 500 when unset). */
+  radius?: number;
 };
 
 export type Reminder = {
