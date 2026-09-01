@@ -10,12 +10,14 @@ import type { Reminder } from '@/lib/reminders';
 export function ReminderRow({
   reminder,
   onPress,
-  onLongPress,
+  onEdit,
+  onDelete,
   onToggle,
 }: {
   reminder: Reminder;
   onPress: () => void;
-  onLongPress: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
   onToggle: () => void;
 }) {
   const theme = useTheme();
@@ -25,8 +27,6 @@ export function ReminderRow({
   return (
     <Pressable
       onPress={onPress}
-      onLongPress={onLongPress}
-      delayLongPress={300}
       style={({ pressed }) => [
         styles.row,
         { backgroundColor: theme.card, borderColor: theme.border, opacity: pressed ? 0.7 : 1 },
@@ -75,7 +75,24 @@ export function ReminderRow({
         )}
       </View>
 
-      <Ionicons name="chevron-forward" size={16} color={theme.textSecondary} />
+      <View style={styles.actions}>
+        <Pressable
+          onPress={onEdit}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Edit reminder"
+          style={({ pressed }) => [styles.actionBtn, pressed && { opacity: 0.5 }]}>
+          <Ionicons name="create-outline" size={18} color={theme.textSecondary} />
+        </Pressable>
+        <Pressable
+          onPress={onDelete}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Delete reminder"
+          style={({ pressed }) => [styles.actionBtn, pressed && { opacity: 0.5 }]}>
+          <Ionicons name="trash-outline" size={18} color={theme.danger} />
+        </Pressable>
+      </View>
     </Pressable>
   );
 }
@@ -102,4 +119,6 @@ const styles = StyleSheet.create({
   strike: { textDecorationLine: 'line-through' },
   meta: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two, flexWrap: 'wrap' },
   locChip: { flexDirection: 'row', alignItems: 'center', gap: 3, maxWidth: '70%' },
+  actions: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one },
+  actionBtn: { padding: 4 },
 });

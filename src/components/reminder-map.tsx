@@ -149,6 +149,11 @@ type Props = {
   onClose?: () => void;
   /** Show the place/address search bar in the top bar. */
   searchable?: boolean;
+  /**
+   * "Pick a location" mode: the map is being used to choose a place for an
+   * existing reminder, so CTAs read "Use this location" and a hint is shown.
+   */
+  pickMode?: boolean;
   /** Fill the parent with no rounded corners / border (full-screen mode). */
   fullBleed?: boolean;
   style?: StyleProp<ViewStyle>;
@@ -161,6 +166,7 @@ export function ReminderMap({
   onExpand,
   onClose,
   searchable,
+  pickMode,
   fullBleed,
   style,
 }: Props) {
@@ -606,6 +612,20 @@ export function ReminderMap({
         </Pressable>
       )}
 
+      {pickMode && (
+        <View
+          pointerEvents="none"
+          style={[
+            styles.pickHint,
+            { top: insets.top + 8 + 48, backgroundColor: colors.card, borderColor: colors.border },
+          ]}>
+          <Ionicons name="hand-left-outline" size={14} color={colors.textSecondary} />
+          <ThemedText type="small" themeColor="textSecondary">
+            Search or long-press the map to set the location
+          </ThemedText>
+        </View>
+      )}
+
       {onExpand && (
         <Pressable
           accessibilityLabel="Open full-screen map"
@@ -655,9 +675,9 @@ export function ReminderMap({
                     styles.spotAdd,
                     { backgroundColor: colors.accent, opacity: pressed ? 0.85 : 1 },
                   ]}>
-                  <Ionicons name="add" size={18} color="#fff" />
+                  <Ionicons name={pickMode ? 'checkmark' : 'add'} size={18} color="#fff" />
                   <ThemedText type="smallBold" style={styles.spotAddText}>
-                    Add reminder here
+                    {pickMode ? 'Use this location' : 'Add reminder here'}
                   </ThemedText>
                 </Pressable>
               </View>
@@ -798,4 +818,16 @@ const styles = StyleSheet.create({
   },
   locateCorner: { right: 10, bottom: 10 },
   expandBtn: { right: 10, top: 10 },
+  pickHint: {
+    position: 'absolute',
+    alignSelf: 'center',
+    maxWidth: '78%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
 });

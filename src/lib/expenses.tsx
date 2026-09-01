@@ -14,6 +14,8 @@ import { createId } from '@/lib/notes';
 import type { CategoryKey } from '@/lib/expense-categories';
 
 const STORAGE_KEY = 'expenses:v1';
+/** `YYYY-MM` → income set for that month (rupees). */
+const INCOME_KEY = 'expenses:income:v1';
 
 export type Expense = {
   id: string;
@@ -42,6 +44,12 @@ export function emptyExpense(): Expense {
 
 type ExpensePatch = Partial<Omit<Expense, 'id' | 'createdAt'>>;
 
+/** `YYYY-MM` key for the month a timestamp falls in. */
+export function monthKey(ts: number = Date.now()): string {
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
 type ExpensesContextValue = {
   /** Newest spend first. */
   expenses: Expense[];
@@ -50,23 +58,28 @@ type ExpensesContextValue = {
   addExpense: (patch?: ExpensePatch) => Expense;
   updateExpense: (id: string, patch: ExpensePatch) => void;
   deleteExpense: (id: string) => void;
+  /** `YYYY-MM` → income the user recorded for that month. */
+  income: Record<string, number>;
+  /** Set (or clear, when `amount <= 0`) the income for a month. Defaults to now. */
+  setMonthlyIncome: (amount: number, ref?: number) => void;
 };
 
 const ExpensesContext = createContext<ExpensesContextValue | null>(null);
 
 export function ExpensesProvider({ children }: { children: ReactNode }) {
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [income, setIncome] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const hydrated = useRef(false);
 
   useEffect(() => {
     (async () => {
       try {
-        const raw = await AsyncStorage.getItem(STORAGE_KEY);
-        if (raw) {
-          const parsed = JSON.parse(raw) as Expense[];
-          if (Array.isArray(parsed)) setExpenses(parsed);
-        }
+        const [rawExpenses, rawIncome] = await AsyncStorage.multiGet([STORAGE_KEY, INCOME_KEY]);
+        const parsed = rawExpenses[1] ? (JSON.parse(rawExpenses[1]) as Expense[]) : null;
+        if (Array.isArray(parsed)) setExpenses(parsed);
+        const parsedIncome = rawIncome[1] ? (JSON.parse(rawIncome[1]) as Record<string, number>) : null;
+        if (parsedIncome && typeof parsedIncome === 'object') setIncome(parsedIncome);
       } catch (e) {
         console.warn('Failed to load expenses', e);
       } finally {
@@ -82,6 +95,13 @@ export function ExpensesProvider({ children }: { children: ReactNode }) {
       console.warn('Failed to save expenses', e),
     );
   }, [expenses]);
+
+  useEffect(() => {
+    if (!hydrated.current) return;
+    AsyncStorage.setItem(INCOME_KEY, JSON.stringify(income)).catch((e) =>
+      console.warn('Failed to save income', e),
+    );
+  }, [income]);
 
   const getExpense = useCallback(
     (id: string) => expenses.find((e) => e.id === id),
@@ -104,14 +124,36 @@ export function ExpensesProvider({ children }: { children: ReactNode }) {
     setExpenses((prev) => prev.filter((e) => e.id !== id));
   }, []);
 
+  const setMonthlyIncome = useCallback<ExpensesContextValue['setMonthlyIncome']>(
+    (amount, ref = Date.now()) => {
+      const k = monthKey(ref);
+      setIncome((prev) => {
+        const next = { ...prev };
+        if (amount > 0) next[k] = amount;
+        else delete next[k];
+        return next;
+      });
+    },
+    [],
+  );
+
   const sorted = useMemo(
     () => [...expenses].sort((a, b) => b.spentAt - a.spentAt || b.createdAt - a.createdAt),
     [expenses],
   );
 
   const value = useMemo<ExpensesContextValue>(
-    () => ({ expenses: sorted, loading, getExpense, addExpense, updateExpense, deleteExpense }),
-    [sorted, loading, getExpense, addExpense, updateExpense, deleteExpense],
+    () => ({
+      expenses: sorted,
+      loading,
+      getExpense,
+      addExpense,
+      updateExpense,
+      deleteExpense,
+      income,
+      setMonthlyIncome,
+    }),
+    [sorted, loading, getExpense, addExpense, updateExpense, deleteExpense, income, setMonthlyIncome],
   );
 
   return <ExpensesContext.Provider value={value}>{children}</ExpensesContext.Provider>;

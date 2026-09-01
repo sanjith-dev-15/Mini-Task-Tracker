@@ -2,7 +2,17 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { DrawerToggleButton } from 'expo-router/drawer';
 import { useMemo, useState } from 'react';
-import { Alert, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import {
+  Alert,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  TextInput,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GlassSurface } from '@/components/glass-surface';
@@ -19,6 +29,7 @@ import {
   fullDayLabel,
   groupByDay,
   lastMonth,
+  monthKey,
   spendByDay,
   sumAmount,
   thisMonth,
@@ -32,9 +43,10 @@ const GOOD = '#10B981';
 export default function ExpensesScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const { expenses, loading } = useExpenses();
+  const { expenses, loading, income, setMonthlyIncome } = useExpenses();
 
   const monthName = currentMonthName();
+  const monthIncome = income[monthKey()] ?? 0;
   const { monthList, monthTotal, delta, perDay, cats } = useMemo(() => {
     const list = thisMonth(expenses);
     const total = sumAmount(list);
@@ -53,6 +65,23 @@ export default function ExpensesScreen() {
 
   const [focusedDay, setFocusedDay] = useState<number | null>(null);
   const [showCal, setShowCal] = useState(false);
+
+  const [showIncome, setShowIncome] = useState(false);
+  const [incomeStr, setIncomeStr] = useState('');
+  const remaining = monthIncome - monthTotal;
+
+  const openIncome = () => {
+    setIncomeStr(monthIncome ? String(monthIncome) : '');
+    setShowIncome(true);
+  };
+  const saveIncome = () => {
+    setMonthlyIncome(parseFloat(incomeStr || '0') || 0);
+    setShowIncome(false);
+  };
+  const clearIncome = () => {
+    setMonthlyIncome(0);
+    setShowIncome(false);
+  };
   const groups = focusedDay
     ? allGroups.filter((g) => g.key === String(focusedDay))
     : allGroups;
@@ -119,6 +148,41 @@ export default function ExpensesScreen() {
                 </GlassSurface>
               )}
             </View>
+
+            {monthIncome > 0 ? (
+              <Pressable
+                onPress={openIncome}
+                accessibilityLabel="Edit monthly income"
+                style={[styles.incomeRow, { borderTopColor: theme.border }]}>
+                <View style={styles.flex}>
+                  <ThemedText type="smallBold" themeColor="textSecondary" style={styles.kicker}>
+                    {remaining >= 0 ? 'LEFT TO SPEND' : 'OVER BUDGET'}
+                  </ThemedText>
+                  <ThemedText
+                    style={[
+                      styles.remaining,
+                      { color: remaining >= 0 ? GOOD : theme.danger },
+                    ]}>
+                    {formatMoney(remaining)}
+                  </ThemedText>
+                </View>
+                <View style={styles.incomeOf}>
+                  <ThemedText type="small" themeColor="textSecondary">
+                    of {formatMoney(monthIncome)}
+                  </ThemedText>
+                  <Ionicons name="pencil" size={12} color={theme.textSecondary} />
+                </View>
+              </Pressable>
+            ) : (
+              <Pressable
+                onPress={openIncome}
+                style={[styles.incomeAdd, { borderColor: theme.border }]}>
+                <Ionicons name="wallet-outline" size={15} color={theme.accent} />
+                <ThemedText type="smallBold" style={{ color: theme.accent }}>
+                  Add money I have
+                </ThemedText>
+              </Pressable>
+            )}
           </View>
         </GlassSurface>
 
@@ -281,6 +345,69 @@ export default function ExpensesScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      <Modal
+        visible={showIncome}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowIncome(false)}>
+        <KeyboardAvoidingView
+          style={styles.flex}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <Pressable style={styles.modalScrim} onPress={() => setShowIncome(false)}>
+            <Pressable
+              style={[styles.modalCard, { backgroundColor: theme.card, borderColor: theme.border }]}
+              onPress={() => {}}>
+              <View style={styles.modalHead}>
+                <ThemedText type="subtitle">Money for {monthName}</ThemedText>
+                <Pressable onPress={() => setShowIncome(false)} hitSlop={8}>
+                  <Ionicons name="close" size={22} color={theme.textSecondary} />
+                </Pressable>
+              </View>
+              <ThemedText type="small" themeColor="textSecondary">
+                Enter your salary or total for the month. “Left to spend” updates as you log
+                expenses.
+              </ThemedText>
+
+              <View style={[styles.incomeInputBox, { borderColor: theme.border }]}>
+                <ThemedText style={[styles.incomeCurrency, { color: theme.textSecondary }]}>
+                  ₹
+                </ThemedText>
+                <TextInput
+                  value={incomeStr}
+                  onChangeText={(t) => setIncomeStr(t.replace(/[^0-9.]/g, ''))}
+                  keyboardType="decimal-pad"
+                  placeholder="0"
+                  placeholderTextColor={theme.textSecondary}
+                  style={[styles.incomeInput, { color: theme.text }]}
+                  autoFocus
+                  onSubmitEditing={saveIncome}
+                  returnKeyType="done"
+                />
+              </View>
+
+              <View style={styles.incomeActions}>
+                {monthIncome > 0 && (
+                  <Pressable
+                    onPress={clearIncome}
+                    style={[styles.incomeBtn, { backgroundColor: theme.backgroundElement }]}>
+                    <ThemedText type="smallBold" style={{ color: theme.danger }}>
+                      Clear
+                    </ThemedText>
+                  </Pressable>
+                )}
+                <Pressable
+                  onPress={saveIncome}
+                  style={[styles.incomeBtn, styles.flex, { backgroundColor: theme.accent }]}>
+                  <ThemedText type="smallBold" style={{ color: '#fff' }}>
+                    Save
+                  </ThemedText>
+                </Pressable>
+              </View>
+            </Pressable>
+          </Pressable>
+        </KeyboardAvoidingView>
+      </Modal>
     </ThemedView>
   );
 }
@@ -375,6 +502,48 @@ const styles = StyleSheet.create({
     gap: 3,
     paddingHorizontal: Spacing.two,
     paddingVertical: 3,
+  },
+  incomeRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    gap: Spacing.two,
+    marginTop: Spacing.three,
+    paddingTop: Spacing.three,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  remaining: { fontSize: 22, lineHeight: 26, fontWeight: '800', letterSpacing: -0.3 },
+  incomeOf: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingBottom: 2 },
+  incomeAdd: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: Spacing.one,
+    marginTop: Spacing.three,
+    paddingVertical: Spacing.one + 2,
+    paddingHorizontal: Spacing.two + 2,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  incomeInputBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.one,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 14,
+    paddingHorizontal: Spacing.three,
+    height: 56,
+    marginTop: Spacing.one,
+  },
+  incomeCurrency: { fontSize: 20, fontWeight: '700' },
+  incomeInput: { flex: 1, fontSize: 24, fontWeight: '800', height: '100%' },
+  incomeActions: { flexDirection: 'row', gap: Spacing.two, marginTop: Spacing.one },
+  incomeBtn: {
+    height: 44,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.four,
   },
 
   // cards
