@@ -5,6 +5,7 @@ import { useMemo, useState } from 'react';
 import {
   Alert,
   FlatList,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -13,11 +14,18 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { GlassSurface } from '@/components/glass-surface';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { notePreview, useNotes, type Note, type NoteViewMode } from '@/lib/notes';
+import {
+  notePreview,
+  useNotes,
+  type Note,
+  type NoteSortMode,
+  type NoteViewMode,
+} from '@/lib/notes';
 
 function noteDate(ts: number): string {
   const d = new Date(ts);
@@ -58,11 +66,23 @@ const VIEW_OPTIONS: {
   { mode: 'content', label: 'Content', icon: 'document-text-outline' },
 ];
 
+const SORT_OPTIONS: {
+  mode: NoteSortMode;
+  label: string;
+  icon: keyof typeof Ionicons.glyphMap;
+}[] = [
+  { mode: 'updated', label: 'Last edited', icon: 'time-outline' },
+  { mode: 'created', label: 'Date created', icon: 'calendar-outline' },
+  { mode: 'title', label: 'Title (A–Z)', icon: 'text-outline' },
+];
+
 export default function NotesListScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const { notes, loading, createNote, deleteNote, viewMode, setViewMode } = useNotes();
+  const { notes, loading, createNote, deleteNote, viewMode, setViewMode, sortMode, setSortMode } =
+    useNotes();
   const [query, setQuery] = useState('');
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const filtered = useMemo(() => notes.filter((n) => matches(n, query)), [notes, query]);
 
@@ -110,6 +130,14 @@ export default function NotesListScreen() {
             </ThemedText>
           </View>
         )}
+        <Pressable
+          onPress={() => setMenuOpen(true)}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="View and sort options"
+          style={({ pressed }) => [styles.headerBtn, pressed && { opacity: 0.5 }]}>
+          <Ionicons name="ellipsis-vertical" size={20} color={theme.text} />
+        </Pressable>
       </View>
 
       <View style={styles.page}>
@@ -125,40 +153,53 @@ export default function NotesListScreen() {
             clearButtonMode="while-editing"
           />
         </View>
-
-        <View style={[styles.viewSwitch, { backgroundColor: theme.backgroundElement }]}>
-          {VIEW_OPTIONS.map((opt) => {
-            const active = viewMode === opt.mode;
-            return (
-              <Pressable
-                key={opt.mode}
-                accessibilityRole="button"
-                accessibilityState={{ selected: active }}
-                accessibilityLabel={`${opt.label} view`}
-                onPress={() => setViewMode(opt.mode)}
-                style={[
-                  styles.viewSwitchItem,
-                  active && { backgroundColor: theme.card },
-                ]}>
-                <Ionicons
-                  name={opt.icon}
-                  size={15}
-                  color={active ? theme.accent : theme.textSecondary}
-                />
-                <ThemedText
-                  type="smallBold"
-                  numberOfLines={1}
-                  style={[
-                    styles.viewSwitchLabel,
-                    { color: active ? theme.text : theme.textSecondary },
-                  ]}>
-                  {opt.label}
-                </ThemedText>
-              </Pressable>
-            );
-          })}
-        </View>
       </View>
+
+      <Modal
+        visible={menuOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setMenuOpen(false)}>
+        <Pressable style={styles.menuScrim} onPress={() => setMenuOpen(false)}>
+          <Pressable onPress={() => {}} style={[styles.menuAnchor, { top: insets.top + 44 }]}>
+            <GlassSurface glass="regular" radius={20} style={styles.menu}>
+              <ThemedText type="smallBold" themeColor="textSecondary" style={styles.menuSection}>
+                VIEW
+              </ThemedText>
+              {VIEW_OPTIONS.map((opt) => (
+                <MenuRow
+                  key={opt.mode}
+                  icon={opt.icon}
+                  label={opt.label}
+                  active={viewMode === opt.mode}
+                  onPress={() => {
+                    setViewMode(opt.mode);
+                    setMenuOpen(false);
+                  }}
+                />
+              ))}
+
+              <View style={[styles.menuDivider, { backgroundColor: theme.border }]} />
+
+              <ThemedText type="smallBold" themeColor="textSecondary" style={styles.menuSection}>
+                SORT BY
+              </ThemedText>
+              {SORT_OPTIONS.map((opt) => (
+                <MenuRow
+                  key={opt.mode}
+                  icon={opt.icon}
+                  label={opt.label}
+                  active={sortMode === opt.mode}
+                  onPress={() => {
+                    setSortMode(opt.mode);
+                    setMenuOpen(false);
+                  }}
+                />
+              ))}
+            </GlassSurface>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <View style={[styles.page, styles.listArea]}>
         {filtered.length === 0 ? (
@@ -219,6 +260,34 @@ export default function NotesListScreen() {
         <Ionicons name="add" size={30} color="#fff" />
       </Pressable>
     </ThemedView>
+  );
+}
+
+/** One row in the three-dot overflow menu. */
+function MenuRow({
+  icon,
+  label,
+  active,
+  onPress,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  active: boolean;
+  onPress: () => void;
+}) {
+  const theme = useTheme();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ selected: active }}
+      onPress={onPress}
+      style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}>
+      <Ionicons name={icon} size={18} color={active ? theme.accent : theme.textSecondary} />
+      <ThemedText style={[styles.menuItemLabel, active && { color: theme.accent }]}>
+        {label}
+      </ThemedText>
+      {active && <Ionicons name="checkmark" size={17} color={theme.accent} />}
+    </Pressable>
   );
 }
 
@@ -359,6 +428,12 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing.two,
   },
   headerTitle: { flex: 1 },
+  headerBtn: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   countPill: {
     minWidth: 26,
     height: 22,
@@ -380,26 +455,49 @@ const styles = StyleSheet.create({
     height: 42,
     borderRadius: 12,
     paddingHorizontal: Spacing.three,
-    marginBottom: Spacing.two,
-  },
-  searchInput: { flex: 1, fontSize: 16, height: '100%' },
-  viewSwitch: {
-    flexDirection: 'row',
-    borderRadius: 12,
-    padding: 3,
-    gap: 2,
     marginBottom: Spacing.three,
   },
-  viewSwitchItem: {
-    flex: 1,
+  searchInput: { flex: 1, fontSize: 16, height: '100%' },
+
+  // Overflow menu (three-dot) — liquid glass
+  menuScrim: { flex: 1, backgroundColor: 'rgba(0,0,0,0.28)' },
+  menuAnchor: {
+    position: 'absolute',
+    right: Spacing.three,
+    borderRadius: 20,
+    shadowColor: '#000',
+    shadowOpacity: 0.24,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 12,
+  },
+  menu: {
+    minWidth: 236,
+    paddingVertical: Spacing.two,
+  },
+  menuSection: {
+    letterSpacing: 1,
+    paddingHorizontal: Spacing.three,
+    paddingTop: Spacing.two,
+    paddingBottom: Spacing.one,
+    opacity: 0.9,
+  },
+  menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 5,
-    paddingVertical: Spacing.two,
-    borderRadius: 9,
+    gap: Spacing.three,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two + 2,
   },
-  viewSwitchLabel: { fontSize: 12, flexShrink: 1 },
+  menuItemPressed: { backgroundColor: 'rgba(128,128,128,0.16)' },
+  menuItemLabel: { flex: 1, fontSize: 15 },
+  menuDivider: {
+    height: StyleSheet.hairlineWidth,
+    marginVertical: Spacing.one,
+    marginHorizontal: Spacing.three,
+    opacity: 0.6,
+  },
+
   listArea: { flex: 1 },
   empty: { textAlign: 'center', marginTop: Spacing.six },
 

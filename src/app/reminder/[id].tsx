@@ -2,7 +2,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Alert,
+  ActivityIndicator,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -13,7 +14,9 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { GlassAlert } from '@/components/glass-alert';
 import { GlassIconButton } from '@/components/glass-icon-button';
+import { MonthCalendar } from '@/components/month-calendar';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
@@ -25,11 +28,13 @@ import {
   RADIUS_OPTIONS,
   radiusLabel,
 } from '@/lib/geofencing';
-import { activeChipKey, DUE_CHIPS } from '@/lib/reminder-dates';
+import { resolveSharedLocation } from '@/lib/maps-link';
+import { activeChipKey, dayStartOf, DUE_CHIPS, formatDue, morningOf } from '@/lib/reminder-dates';
 import { isBlankReminder, useReminders, type Reminder } from '@/lib/reminders';
 
 export default function ReminderEditorScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, fresh } = useLocalSearchParams<{ id: string; fresh?: string }>();
+  const isNew = fresh === '1';
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const { getReminder, updateReminder, deleteReminder } = useReminders();
@@ -40,13 +45,19 @@ export default function ReminderEditorScreen() {
     ref.current = reminder;
   });
 
-  // Discard on exit if the user never gave it anything worth keeping.
+  // Discard on exit if the user never gave it anything worth keeping. A
+  // just-created reminder (opened with `fresh`) needs a title or notes to
+  // survive — a bare location picked on the map but never named doesn't count.
   useEffect(() => {
     return () => {
       const current = ref.current;
-      if (current && isBlankReminder(current)) deleteReminder(current.id);
+      if (!current) return;
+      const discard = isNew
+        ? !current.title.trim() && !current.notes.trim()
+        : isBlankReminder(current);
+      if (discard) deleteReminder(current.id);
     };
-  }, [deleteReminder]);
+  }, [deleteReminder, isNew]);
 
   // Whether "location reminders" is actually armed (toggle on + all perms).
   const [geoActive, setGeoActive] = useState(false);
@@ -62,8 +73,45 @@ export default function ReminderEditorScreen() {
     }, []),
   );
 
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [showCal, setShowCal] = useState(false);
+
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [linkText, setLinkText] = useState('');
+  const [linkBusy, setLinkBusy] = useState(false);
+  const [linkError, setLinkError] = useState(false);
+
   // Close the editor and land on the Home tab, wherever we were opened from.
   const goHome = useCallback(() => router.replace('/'), []);
+
+  const applyLink = async () => {
+    const text = linkText.trim();
+    if (!text || linkBusy || !reminder) return;
+    Keyboard.dismiss();
+    setLinkBusy(true);
+    setLinkError(false);
+    try {
+      const found = await resolveSharedLocation(text);
+      if (!found) {
+        setLinkError(true);
+        return;
+      }
+      updateReminder(reminder.id, {
+        location: {
+          lat: found.lat,
+          lng: found.lng,
+          label: found.label ?? reminder.location?.label,
+          radius: reminder.location?.radius,
+        },
+      });
+      setLinkText('');
+      setLinkOpen(false);
+    } catch {
+      setLinkError(true);
+    } finally {
+      setLinkBusy(false);
+    }
+  };
 
   if (!reminder) {
     return (
@@ -75,20 +123,6 @@ export default function ReminderEditorScreen() {
       </ThemedView>
     );
   }
-
-  const confirmDelete = () => {
-    Alert.alert('Delete reminder?', 'This cannot be undone.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: () => {
-          deleteReminder(reminder.id);
-          goHome();
-        },
-      },
-    ]);
-  };
 
   const currentChip = activeChipKey(reminder.dueAt);
   const loc = reminder.location;
@@ -105,10 +139,30 @@ export default function ReminderEditorScreen() {
         <GlassIconButton
           name="trash-outline"
           color={theme.danger}
-          onPress={confirmDelete}
+          onPress={() => setConfirmingDelete(true)}
           accessibilityLabel="Delete reminder"
         />
       </View>
+
+      <GlassAlert
+        visible={confirmingDelete}
+        icon="trash-outline"
+        title="Delete reminder?"
+        message="This cannot be undone."
+        onRequestClose={() => setConfirmingDelete(false)}
+        actions={[
+          { label: 'Cancel', style: 'cancel', onPress: () => setConfirmingDelete(false) },
+          {
+            label: 'Delete',
+            style: 'destructive',
+            onPress: () => {
+              setConfirmingDelete(false);
+              deleteReminder(reminder.id);
+              goHome();
+            },
+          },
+        ]}
+      />
 
       <KeyboardAvoidingView
         style={styles.flex}
@@ -154,7 +208,10 @@ export default function ReminderEditorScreen() {
               return (
                 <Pressable
                   key={chip.key}
-                  onPress={() => updateReminder(reminder.id, { dueAt: chip.resolve() })}
+                  onPress={() => {
+                    setShowCal(false);
+                    updateReminder(reminder.id, { dueAt: chip.resolve() });
+                  }}
                   style={[
                     styles.chip,
                     {
@@ -170,31 +227,243 @@ export default function ReminderEditorScreen() {
                 </Pressable>
               );
             })}
+
+            {(() => {
+              const custom = reminder.dueAt != null && currentChip === '';
+              const active = custom || showCal;
+              return (
+                <Pressable
+                  onPress={() => setShowCal((v) => !v)}
+                  style={[
+                    styles.chip,
+                    styles.dateChip,
+                    {
+                      backgroundColor: active ? theme.accent : theme.backgroundElement,
+                      borderColor: active ? theme.accent : theme.border,
+                    },
+                  ]}>
+                  <Ionicons
+                    name="calendar-outline"
+                    size={13}
+                    color={active ? '#fff' : theme.textSecondary}
+                  />
+                  <ThemedText
+                    type="smallBold"
+                    style={{ color: active ? '#fff' : theme.textSecondary }}>
+                    {custom ? formatDue(reminder.dueAt!) : 'Pick a date'}
+                  </ThemedText>
+                </Pressable>
+              );
+            })()}
           </View>
+
+          {showCal && (
+            <View style={[styles.calendar, { backgroundColor: theme.backgroundElement }]}>
+              <MonthCalendar
+                selected={reminder.dueAt != null ? dayStartOf(reminder.dueAt) : null}
+                onSelect={(ts) => {
+                  updateReminder(reminder.id, { dueAt: morningOf(ts) });
+                  setShowCal(false);
+                }}
+              />
+            </View>
+          )}
 
           <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
             LOCATION
           </ThemedText>
-          <View style={[styles.locBox, { backgroundColor: theme.backgroundElement }]}>
-            <Ionicons
-              name={loc ? 'location' : 'location-outline'}
-              size={18}
-              color={loc ? theme.accent : theme.textSecondary}
-            />
-            <ThemedText themeColor={loc ? 'text' : 'textSecondary'} style={styles.flex}>
-              {loc
-                ? (loc.label ?? `${loc.lat.toFixed(4)}, ${loc.lng.toFixed(4)}`)
-                : 'No location — long-press the map on Home to pin one'}
-            </ThemedText>
-            {loc && (
+
+          {loc ? (
+            <View
+              style={[
+                styles.locCard,
+                { backgroundColor: theme.backgroundElement, borderColor: theme.border },
+              ]}>
+              <View style={styles.locCardHead}>
+                <View style={[styles.locDisc, { backgroundColor: theme.accent + '1F' }]}>
+                  <Ionicons name="location" size={18} color={theme.accent} />
+                </View>
+                <View style={styles.flex}>
+                  <ThemedText numberOfLines={2}>{loc.label ?? 'Dropped pin'}</ThemedText>
+                  <ThemedText type="small" themeColor="textSecondary">
+                    {loc.lat.toFixed(5)}, {loc.lng.toFixed(5)}
+                  </ThemedText>
+                </View>
+                <Pressable
+                  onPress={() => updateReminder(reminder.id, { location: null })}
+                  hitSlop={10}
+                  accessibilityLabel="Remove location">
+                  <Ionicons name="close-circle" size={22} color={theme.textSecondary} />
+                </Pressable>
+              </View>
+              <View style={[styles.locCardActions, { borderTopColor: theme.border }]}>
+                <Pressable
+                  onPress={() =>
+                    router.push({ pathname: '/map', params: { pickFor: reminder.id } })
+                  }
+                  style={({ pressed }) => [
+                    styles.locCardAction,
+                    pressed && { backgroundColor: theme.backgroundSelected },
+                  ]}>
+                  <Ionicons name="map-outline" size={15} color={theme.accent} />
+                  <ThemedText type="smallBold" style={{ color: theme.accent }}>
+                    Change on map
+                  </ThemedText>
+                </Pressable>
+                <View style={[styles.locCardSep, { backgroundColor: theme.border }]} />
+                <Pressable
+                  onPress={() => {
+                    setLinkError(false);
+                    setLinkOpen((v) => !v);
+                  }}
+                  style={({ pressed }) => [
+                    styles.locCardAction,
+                    pressed && { backgroundColor: theme.backgroundSelected },
+                  ]}>
+                  <Ionicons
+                    name={linkOpen ? 'chevron-up' : 'link-outline'}
+                    size={15}
+                    color={theme.accent}
+                  />
+                  <ThemedText type="smallBold" style={{ color: theme.accent }}>
+                    Paste link
+                  </ThemedText>
+                </Pressable>
+              </View>
+            </View>
+          ) : (
+            <View style={styles.locGrid}>
               <Pressable
-                onPress={() => updateReminder(reminder.id, { location: null })}
-                hitSlop={10}
-                accessibilityLabel="Remove location">
-                <Ionicons name="close-circle" size={20} color={theme.textSecondary} />
+                onPress={() =>
+                  router.push({ pathname: '/map', params: { pickFor: reminder.id } })
+                }
+                accessibilityRole="button"
+                accessibilityLabel="Pick a location on the map"
+                style={({ pressed }) => [
+                  styles.locOption,
+                  {
+                    backgroundColor: theme.backgroundElement,
+                    borderColor: theme.border,
+                    opacity: pressed ? 0.7 : 1,
+                  },
+                ]}>
+                <View style={[styles.locDisc, { backgroundColor: theme.accent + '1F' }]}>
+                  <Ionicons name="location-outline" size={20} color={theme.accent} />
+                </View>
+                <ThemedText type="smallBold">Pick on map</ThemedText>
+                <ThemedText type="small" themeColor="textSecondary" style={styles.locOptionSub}>
+                  Search or drop a pin
+                </ThemedText>
               </Pressable>
-            )}
-          </View>
+
+              <Pressable
+                onPress={() => {
+                  setLinkError(false);
+                  setLinkOpen((v) => !v);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Paste a Google Maps link"
+                style={({ pressed }) => [
+                  styles.locOption,
+                  {
+                    backgroundColor: linkOpen ? theme.accent + '14' : theme.backgroundElement,
+                    borderColor: linkOpen ? theme.accent : theme.border,
+                    opacity: pressed ? 0.7 : 1,
+                  },
+                ]}>
+                <View style={[styles.locDisc, { backgroundColor: theme.accent + '1F' }]}>
+                  <Ionicons name="link" size={20} color={theme.accent} />
+                </View>
+                <ThemedText type="smallBold">Paste link</ThemedText>
+                <ThemedText type="small" themeColor="textSecondary" style={styles.locOptionSub}>
+                  From Google Maps
+                </ThemedText>
+              </Pressable>
+            </View>
+          )}
+
+          {linkOpen && (
+            <View style={styles.mapsLinkBox}>
+              <View
+                style={[
+                  styles.mapsLinkField,
+                  {
+                    backgroundColor: theme.backgroundElement,
+                    borderColor: linkError ? theme.danger : theme.border,
+                  },
+                ]}>
+                <Ionicons
+                  name="link-outline"
+                  size={15}
+                  color={theme.textSecondary}
+                  style={styles.mapsLinkFieldIcon}
+                />
+                <TextInput
+                  value={linkText}
+                  onChangeText={(t) => {
+                    setLinkText(t);
+                    setLinkError(false);
+                  }}
+                  placeholder="maps.app.goo.gl/…  or  12.3456, 78.9012"
+                  placeholderTextColor={theme.textSecondary}
+                  style={[styles.mapsLinkInput, { color: theme.text }]}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  keyboardType="url"
+                  multiline
+                />
+                {linkText.length > 0 && !linkBusy && (
+                  <Pressable
+                    onPress={() => {
+                      setLinkText('');
+                      setLinkError(false);
+                    }}
+                    hitSlop={8}
+                    accessibilityLabel="Clear">
+                    <Ionicons name="close-circle" size={16} color={theme.textSecondary} />
+                  </Pressable>
+                )}
+              </View>
+
+              <Pressable
+                onPress={applyLink}
+                disabled={linkBusy || !linkText.trim()}
+                style={[
+                  styles.mapsLinkBtn,
+                  {
+                    backgroundColor: theme.accent,
+                    opacity: linkBusy || !linkText.trim() ? 0.4 : 1,
+                  },
+                ]}>
+                {linkBusy ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <>
+                    <Ionicons name="checkmark" size={16} color="#fff" />
+                    <ThemedText type="smallBold" style={{ color: '#fff' }}>
+                      Use this location
+                    </ThemedText>
+                  </>
+                )}
+              </Pressable>
+
+              <View style={styles.mapsLinkNote}>
+                <Ionicons
+                  name={linkError ? 'alert-circle-outline' : 'information-circle-outline'}
+                  size={13}
+                  color={linkError ? theme.danger : theme.textSecondary}
+                  style={styles.mapsLinkFieldIcon}
+                />
+                <ThemedText
+                  type="small"
+                  style={[styles.flex, { color: linkError ? theme.danger : theme.textSecondary }]}>
+                  {linkError
+                    ? 'Couldn’t read a location from that. In Google Maps tap Share and paste the whole link — or paste “latitude, longitude”.'
+                    : 'In Google Maps: Share → Copy link, then paste here for a precise pin.'}
+                </ThemedText>
+              </View>
+            </View>
+          )}
 
           {loc && (
             <>
@@ -299,12 +568,91 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.one + 2,
   },
-  locBox: {
+  dateChip: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one },
+  calendar: {
+    borderRadius: 14,
+    padding: Spacing.three,
+    marginTop: Spacing.two,
+  },
+  locDisc: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  // no-location: two side-by-side method cards
+  locGrid: { flexDirection: 'row', gap: Spacing.two },
+  locOption: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 2,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingVertical: Spacing.three,
+    paddingHorizontal: Spacing.two,
+  },
+  locOptionSub: { textAlign: 'center' },
+
+  // has-location: detail card with an action bar
+  locCard: {
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    overflow: 'hidden',
+  },
+  locCardHead: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.two,
-    borderRadius: 12,
     padding: Spacing.three,
+  },
+  locCardActions: {
+    flexDirection: 'row',
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  locCardAction: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.one + 2,
+    paddingVertical: Spacing.two + 2,
+  },
+  locCardSep: { width: StyleSheet.hairlineWidth },
+
+  mapsLinkBox: { gap: Spacing.two, marginTop: Spacing.two },
+  mapsLinkField: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.two,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 12,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two + 2,
+  },
+  mapsLinkFieldIcon: { marginTop: 2 },
+  mapsLinkInput: {
+    flex: 1,
+    fontSize: 14,
+    lineHeight: 19,
+    padding: 0,
+    minHeight: 20,
+    maxHeight: 88,
+  },
+  mapsLinkBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.one + 2,
+    height: 46,
+    borderRadius: 12,
+  },
+  mapsLinkNote: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.one + 2,
+    paddingHorizontal: Spacing.one,
   },
   geoHint: {
     flexDirection: 'row',

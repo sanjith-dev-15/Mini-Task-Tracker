@@ -21,6 +21,8 @@ import type { Reminder } from '@/lib/reminders';
 const GEOFENCE_TASK = 'reminder-geofence';
 const CHANNEL_ID = 'reminders';
 const ENABLED_KEY = 'geofence:enabled';
+/** Fingerprint of the currently-registered region set (see `syncGeofences`). */
+const SIGNATURE_KEY = 'geofence:signature';
 /** Must match STORAGE_KEY in `src/lib/reminders.tsx`. */
 const REMINDERS_KEY = 'reminders:v1';
 
@@ -143,9 +145,24 @@ async function isStarted(): Promise<boolean> {
   }
 }
 
+/** Stable fingerprint of a region set — order-independent. */
+function signature(regions: Location.LocationRegion[]): string {
+  return regions
+    .map((r) => `${r.identifier}:${r.latitude},${r.longitude}@${r.radius}`)
+    .sort()
+    .join('|');
+}
+
 /**
  * (Re)register geofences for every located, not-done reminder. Cheap and
  * idempotent — call it whenever reminders or permissions change.
+ *
+ * `startGeofencingAsync` re-arms every fence from scratch, and both platforms
+ * replay an `Enter` transition for any region the device is *already* inside at
+ * registration time. This effect runs on every app launch and every reminder
+ * edit, so calling it unconditionally spams a notification each time the app is
+ * opened near a reminder. To avoid that we fingerprint the region set and only
+ * re-register when it actually changed.
  */
 export async function syncGeofences(reminders: Reminder[]): Promise<void> {
   const [enabled, state] = await Promise.all([
@@ -169,10 +186,21 @@ export async function syncGeofences(reminders: Reminder[]): Promise<void> {
     if (await isStarted()) {
       await Location.stopGeofencingAsync(GEOFENCE_TASK).catch(() => {});
     }
+    await AsyncStorage.removeItem(SIGNATURE_KEY);
     return;
   }
 
-  await Location.startGeofencingAsync(GEOFENCE_TASK, regions).catch((e) =>
-    console.warn('startGeofencingAsync failed', e),
-  );
+  const next = signature(regions);
+  const [prev, started] = await Promise.all([
+    AsyncStorage.getItem(SIGNATURE_KEY),
+    isStarted(),
+  ]);
+  if (started && prev === next) return;
+
+  try {
+    await Location.startGeofencingAsync(GEOFENCE_TASK, regions);
+    await AsyncStorage.setItem(SIGNATURE_KEY, next);
+  } catch (e) {
+    console.warn('startGeofencingAsync failed', e);
+  }
 }

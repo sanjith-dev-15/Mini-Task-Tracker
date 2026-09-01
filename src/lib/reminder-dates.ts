@@ -16,6 +16,20 @@ function atMorning(dayOffset: number): number {
   return d.getTime();
 }
 
+/** 9am on the calendar day the given timestamp falls on. */
+export function morningOf(ts: number): number {
+  const d = new Date(ts);
+  d.setHours(9, 0, 0, 0);
+  return d.getTime();
+}
+
+/** Midnight (local) of the day the given timestamp falls on. */
+export function dayStartOf(ts: number): number {
+  const d = new Date(ts);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
 export type DueChip = { key: string; label: string; resolve: () => number | null };
 
 export const DUE_CHIPS: DueChip[] = [

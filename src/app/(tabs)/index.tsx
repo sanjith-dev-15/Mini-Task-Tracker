@@ -1,9 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { DrawerToggleButton } from 'expo-router/drawer';
+import { useState } from 'react';
 import { FlatList, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { GlassAlert } from '@/components/glass-alert';
 import { ReminderMap } from '@/components/reminder-map';
 import { ReminderRow } from '@/components/reminder-row';
 import { ThemedText } from '@/components/themed-text';
@@ -22,16 +24,24 @@ export default function HomeScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
-  const { reminders, loading, createReminder, toggleDone } = useReminders();
+  const { reminders, loading, createReminder, toggleDone, deleteReminder } = useReminders();
 
   const wide = width >= WIDE_BREAKPOINT;
   const mapHeight = Math.min(Math.round(height * 0.32), 300);
 
   const openReminder = (id: string) =>
     router.push({ pathname: '/reminder/[id]', params: { id } });
-  const openNew = () => openReminder(createReminder().id);
+  // `fresh` tells the editor to discard the reminder on exit unless it's given
+  // a title/notes — so an abandoned "new reminder" leaves nothing behind.
+  const openNew = () =>
+    router.push({ pathname: '/reminder/[id]', params: { id: createReminder().id, fresh: '1' } });
   const addAt = (coord: { lat: number; lng: number }) =>
-    openReminder(createReminder({ location: coord }).id);
+    router.push({
+      pathname: '/reminder/[id]',
+      params: { id: createReminder({ location: coord }).id, fresh: '1' },
+    });
+
+  const [pendingDelete, setPendingDelete] = useState<{ id: string; title: string } | null>(null);
 
   const pending = reminders.filter((r) => !r.done).length;
 
@@ -55,7 +65,8 @@ export default function HomeScreen() {
         <ReminderRow
           reminder={item}
           onPress={() => openReminder(item.id)}
-          onLongPress={() => openReminder(item.id)}
+          onEdit={() => openReminder(item.id)}
+          onDelete={() => setPendingDelete({ id: item.id, title: item.title })}
           onToggle={() => toggleDone(item.id)}
         />
       )}
@@ -109,6 +120,25 @@ export default function HomeScreen() {
         ]}>
         <Ionicons name="add" size={30} color="#fff" />
       </Pressable>
+
+      <GlassAlert
+        visible={pendingDelete != null}
+        icon="trash-outline"
+        title="Delete reminder?"
+        message={pendingDelete?.title.trim() || 'Untitled reminder'}
+        onRequestClose={() => setPendingDelete(null)}
+        actions={[
+          { label: 'Cancel', style: 'cancel', onPress: () => setPendingDelete(null) },
+          {
+            label: 'Delete',
+            style: 'destructive',
+            onPress: () => {
+              if (pendingDelete) deleteReminder(pendingDelete.id);
+              setPendingDelete(null);
+            },
+          },
+        ]}
+      />
     </ThemedView>
   );
 }
