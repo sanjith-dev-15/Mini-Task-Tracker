@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useCallback, useState, type ReactElement } from 'react';
 import { Modal, Pressable, StyleSheet, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 
@@ -103,6 +104,47 @@ export function GlassAlert({
       </View>
     </Modal>
   );
+}
+
+type GlassAlertConfig = {
+  title: string;
+  message?: string;
+  icon?: keyof typeof Ionicons.glyphMap;
+  tone?: 'danger' | 'accent';
+  actions: GlassAlertAction[];
+};
+
+/**
+ * Imperative `Alert.alert` replacement. Render `alert` somewhere in the tree and
+ * call `showAlert(config)` to open it — each action closes the dialog before it
+ * runs, so callers don't manage `visible` state.
+ */
+export function useGlassAlert(): {
+  alert: ReactElement;
+  showAlert: (config: GlassAlertConfig) => void;
+} {
+  const [config, setConfig] = useState<GlassAlertConfig | null>(null);
+  const close = useCallback(() => setConfig(null), []);
+
+  const alert = (
+    <GlassAlert
+      visible={config != null}
+      title={config?.title ?? ''}
+      message={config?.message}
+      icon={config?.icon}
+      tone={config?.tone}
+      onRequestClose={close}
+      actions={(config?.actions ?? []).map((a) => ({
+        ...a,
+        onPress: () => {
+          close();
+          a.onPress();
+        },
+      }))}
+    />
+  );
+
+  return { alert, showAlert: setConfig };
 }
 
 const styles = StyleSheet.create({
