@@ -5,7 +5,6 @@ import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Linking,
   Pressable,
   ScrollView,
@@ -16,6 +15,7 @@ import {
 import Animated, { FadeIn, LinearTransition } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useGlassAlert } from '@/components/glass-alert';
 import { GlassIconButton } from '@/components/glass-icon-button';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -143,6 +143,7 @@ function usePermission(key: string, active: boolean) {
   const [status, setStatus] = useState<PermStatus>('undetermined');
   const [canAsk, setCanAsk] = useState(true);
   const [busy, setBusy] = useState(false);
+  const { alert, showAlert } = useGlassAlert();
 
   const refresh = useCallback(() => {
     if (!active) return;
@@ -157,22 +158,31 @@ function usePermission(key: string, active: boolean) {
   useFocusEffect(useCallback(() => refresh(), [refresh]));
 
   const promptSettings = (mode: 'grant' | 'revoke') =>
-    Alert.alert(
-      mode === 'grant' ? 'Allow in system settings' : 'Turn off in system settings',
-      mode === 'grant'
-        ? 'Android won’t let the app ask again. Enable it in the app’s system settings.'
-        : 'The app can’t remove a permission it was given. Turn it off in the app’s system settings.',
-      [
-        { text: 'Not now', style: 'cancel' },
-        { text: 'Open settings', onPress: () => Linking.openSettings() },
+    showAlert({
+      icon: mode === 'grant' ? 'lock-open-outline' : 'lock-closed-outline',
+      tone: 'accent',
+      title: mode === 'grant' ? 'Allow in system settings' : 'Turn off in system settings',
+      message:
+        mode === 'grant'
+          ? 'Android won’t let the app ask again. Enable it in the app’s system settings.'
+          : 'The app can’t remove a permission it was given. Turn it off in the app’s system settings.',
+      actions: [
+        { label: 'Not now', style: 'cancel', onPress: () => {} },
+        { label: 'Open settings', onPress: () => Linking.openSettings() },
       ],
-    );
+    });
 
   const set = useCallback(
     async (next: boolean) => {
       if (busy) return;
       if (status === 'unavailable') {
-        Alert.alert('Not available', 'Rebuild the app to use this permission.');
+        showAlert({
+          icon: 'construct-outline',
+          tone: 'accent',
+          title: 'Not available',
+          message: 'Rebuild the app to use this permission.',
+          actions: [{ label: 'Got it', onPress: () => {} }],
+        });
         return;
       }
       if (!next) {
@@ -190,10 +200,11 @@ function usePermission(key: string, active: boolean) {
       setBusy(false);
       if (r.status !== 'granted' && !r.canAsk) promptSettings('grant');
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [busy, status, canAsk, key],
   );
 
-  return { status, busy, set };
+  return { status, busy, set, alert };
 }
 
 /* ------------------------------------------------------------- geofencing */
@@ -210,6 +221,7 @@ const GEO_HINT: Record<GeofenceState, string> = {
 function LocationRemindersControl() {
   const theme = useTheme();
   const { reminders } = useReminders();
+  const { alert, showAlert } = useGlassAlert();
   const [enabled, setEnabled] = useState(false);
   const [state, setState] = useState<GeofenceState>('needs-location');
   const [busy, setBusy] = useState(false);
@@ -236,19 +248,26 @@ function LocationRemindersControl() {
           await setGeofencingEnabled(true, reminders);
           setEnabled(true);
         } else if (result === 'needs-background') {
-          Alert.alert(
-            'One more step',
-            'Set this app’s location access to "Allow all the time" in system settings, then try again.',
-            [
-              { text: 'Not now', style: 'cancel' },
-              { text: 'Open settings', onPress: () => Linking.openSettings() },
+          showAlert({
+            icon: 'navigate-outline',
+            tone: 'accent',
+            title: 'One more step',
+            message:
+              'Set this app’s location access to "Allow all the time" in system settings, then try again.',
+            actions: [
+              { label: 'Not now', style: 'cancel', onPress: () => {} },
+              { label: 'Open settings', onPress: () => Linking.openSettings() },
             ],
-          );
+          });
         } else if (result === 'unavailable') {
-          Alert.alert(
-            'Rebuild needed',
-            'Location reminders need a fresh build of the app before they can be turned on.',
-          );
+          showAlert({
+            icon: 'construct-outline',
+            tone: 'accent',
+            title: 'Rebuild needed',
+            message:
+              'Location reminders need a fresh build of the app before they can be turned on.',
+            actions: [{ label: 'Got it', onPress: () => {} }],
+          });
         }
       } else {
         await setGeofencingEnabled(false, reminders);
@@ -264,9 +283,15 @@ function LocationRemindersControl() {
   const on = enabled && state === 'ready';
 
   return (
-    <Animated.View
-      layout={LinearTransition.duration(180)}
-      style={[styles.card, styles.featureCard, { backgroundColor: theme.card, borderColor: theme.accent + '40' }]}>
+    <>
+      {alert}
+      <Animated.View
+        layout={LinearTransition.duration(180)}
+        style={[
+          styles.card,
+          styles.featureCard,
+          { backgroundColor: theme.card, borderColor: theme.accent + '40' },
+        ]}>
       <View style={styles.rowHead}>
         <Ionicons name="notifications-circle" size={22} color={theme.accent} />
         <View style={styles.headText}>
@@ -288,7 +313,8 @@ function LocationRemindersControl() {
           </ThemedText>
         </Pressable>
       )}
-    </Animated.View>
+      </Animated.View>
+    </>
   );
 }
 
@@ -305,12 +331,14 @@ function PermissionCard({
 }) {
   const theme = useTheme();
   const runtime = (RUNTIME_KEYS as readonly string[]).includes(info.key);
-  const { status, busy, set } = usePermission(info.key, runtime);
+  const { status, busy, set, alert } = usePermission(info.key, runtime);
 
   return (
-    <Animated.View
-      layout={LinearTransition.duration(180)}
-      style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}>
+    <>
+      {alert}
+      <Animated.View
+        layout={LinearTransition.duration(180)}
+        style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}>
       <View style={styles.rowHead}>
         <Pressable onPress={onExpand} style={styles.headMain} hitSlop={6}>
           <Ionicons name={info.icon} size={20} color={theme.text} />
@@ -362,7 +390,8 @@ function PermissionCard({
           </ThemedText>
         </Animated.View>
       )}
-    </Animated.View>
+      </Animated.View>
+    </>
   );
 }
 

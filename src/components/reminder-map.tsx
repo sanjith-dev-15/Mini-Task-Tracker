@@ -3,6 +3,7 @@ import * as Location from 'expo-location';
 import {
   Camera,
   type CameraRef,
+  LogManager,
   Map,
   Marker,
   UserLocation,
@@ -31,6 +32,19 @@ import { ThemedText } from '@/components/themed-text';
 import { formatDue, isOverdue } from '@/lib/reminder-dates';
 import { useThemeContext } from '@/lib/theme';
 import type { Reminder, ReminderLocation } from '@/lib/reminders';
+
+/**
+ * Silence the flood of `Mbgl-HttpRequest` WARNs MapLibre emits whenever it
+ * cancels an in-flight tile request — routine when the map pans, zooms or
+ * unmounts (the HTTP/2 stream is reset with CANCEL). The library only downgrades
+ * the exact "Canceled" wording, not the "stream was reset: CANCEL" variant, so
+ * we drop those here and let every other log through untouched.
+ */
+LogManager.onLog(
+  (log) =>
+    log.tag === 'Mbgl-HttpRequest' &&
+    /cancell?ed|stream was reset: cancel/i.test(log.message),
+);
 
 /** OpenFreeMap — hosted vector tiles, no API key, no usage limits. */
 const STYLE_URL = {
@@ -253,6 +267,40 @@ export function ReminderMap({
       });
     } catch {
       // ignore — leave the camera where it is
+    } finally {
+      setLocating(false);
+    }
+  };
+
+  /** Drop a pin on the device's current position — no search needed. */
+  const pinMyLocation = async () => {
+    if (locating) return;
+    Keyboard.dismiss();
+    setLocating(true);
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') return;
+      const pos = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.High,
+      });
+      const here = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      setUserLoc([here.lng, here.lat]);
+      setSelectedId(null);
+      setResults([]);
+      setNotFound(false);
+      setQuery('');
+      setSpot({ ...here, label: undefined });
+      cameraRef.current?.easeTo({
+        center: [here.lng, here.lat],
+        zoom: PIN_ZOOM,
+        duration: 700,
+      });
+      const label = await reverseGeocode(here.lat, here.lng);
+      setSpot((cur) =>
+        cur && cur.lat === here.lat && cur.lng === here.lng ? { ...cur, label } : cur,
+      );
+    } catch {
+      // ignore — nothing pinned
     } finally {
       setLocating(false);
     }
@@ -683,6 +731,30 @@ export function ReminderMap({
               </View>
             )}
 
+            {!spot && results.length === 0 && !notFound && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Pin my current location"
+                onPress={pinMyLocation}
+                style={({ pressed }) => [
+                  styles.myLocBtn,
+                  {
+                    backgroundColor: colors.card,
+                    borderColor: colors.border,
+                    opacity: pressed ? 0.7 : 1,
+                  },
+                ]}>
+                {locating ? (
+                  <ActivityIndicator size="small" color={colors.accent} />
+                ) : (
+                  <Ionicons name="navigate" size={15} color={colors.accent} />
+                )}
+                <ThemedText type="smallBold" style={{ color: colors.accent }}>
+                  {locating ? 'Getting your location…' : 'Use my current location'}
+                </ThemedText>
+              </Pressable>
+            )}
+
             {resultsList}
             {searchBox}
           </View>
@@ -745,6 +817,16 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   bottomLeft: { flex: 1, gap: 8 },
+  myLocBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 7,
+    height: 38,
+    borderRadius: 19,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 14,
+  },
   spotCard: {
     borderRadius: 14,
     borderWidth: StyleSheet.hairlineWidth,

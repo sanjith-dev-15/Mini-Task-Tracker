@@ -116,6 +116,28 @@ jobs:
           echo "path=$dest" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
+      - name: Trim old APKs (keep the previous build alongside the new one)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          # Delete every APK except the newest existing one; the upload below
+          # then adds the current build, leaving the release with two:
+          # previous + latest. To retain more, widen the slice
+          # (.[1:] -> .[2:] keeps two old builds, etc.).
+          stale=$(gh release view android-latest --json assets \
+                    --jq '[.assets[] | select(.name | endswith(".apk"))]
+                          | sort_by(.createdAt) | reverse | .[1:] | .[].name' \
+                    2>/dev/null || true)
+          if [ -z "$stale" ]; then
+            echo "Nothing to trim."
+          else
+            echo "$stale" | while read -r asset; do
+              echo "Deleting old asset: $asset"
+              gh release delete-asset android-latest "$asset" --yes
+            done
+          fi
+
       - name: Publish rolling release
         uses: softprops/action-gh-release@v2
         with:
@@ -130,3 +152,40 @@ jobs:
             - App version: **${{ steps.apk.outputs.version }}** (versionCode ${{ github.run_number }})
             - arm64-v8a only. Sideload: enable "Install unknown apps", then open the APK.
           files: ${{ steps.apk.outputs.path }}
+
+      # Ping me when a build ships. Optional — skipped unless the two secrets
+      # exist. One-time setup:
+      #   1. Telegram → message @BotFather → /newbot → copy the bot token.
+      #   2. Message your new bot once (so it may DM you), then open
+      #      https://api.telegram.org/bot<TOKEN>/getUpdates and copy
+      #      "chat":{"id": ...} — or message @userinfobot for your numeric id.
+      #   3. Repo ▸ Settings ▸ Secrets and variables ▸ Actions → add
+      #      TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID.
+      - name: Notify me on Telegram
+        if: success()
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          VERSION: ${{ steps.apk.outputs.version }}
+          RUN_NUMBER: ${{ github.run_number }}
+          COMMIT: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+          APK: ${{ steps.apk.outputs.path }}
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo "Telegram secrets not set — skipping notification."
+            exit 0
+          fi
+          text=$(printf '%s\n' \
+            "🟢 New Goku Android build is live" \
+            "" \
+            "Version $VERSION (build $RUN_NUMBER)" \
+            "Commit ${COMMIT:0:7} · $APK" \
+            "" \
+            "Install: https://github.com/$REPO/releases/tag/android-latest")
+          curl -sS --fail \
+            "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+            --data-urlencode "chat_id=$TELEGRAM_CHAT_ID" \
+            --data-urlencode "text=$text" \
+            --data-urlencode "disable_web_page_preview=true"
