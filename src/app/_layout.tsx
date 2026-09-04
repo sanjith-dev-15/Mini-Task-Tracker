@@ -16,6 +16,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AnimatedSplash } from '@/components/animated-splash';
 import { GlassNav } from '@/components/glass-nav';
 import { Spacing } from '@/constants/theme';
+import { AuthProvider } from '@/lib/auth';
 import { ExpensesProvider } from '@/lib/expenses';
 // Registers the geofencing background task + notification handler at module load.
 import { syncGeofences } from '@/lib/geofencing';
@@ -44,14 +45,16 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <ThemeProvider>
-          <NotesProvider>
-            <RemindersProvider>
-              <ExpensesProvider>
-                <GeofenceSync />
-                <ThemedRoot />
-              </ExpensesProvider>
-            </RemindersProvider>
-          </NotesProvider>
+          <AuthProvider>
+            <NotesProvider>
+              <RemindersProvider>
+                <ExpensesProvider>
+                  <GeofenceSync />
+                  <ThemedRoot />
+                </ExpensesProvider>
+              </RemindersProvider>
+            </NotesProvider>
+          </AuthProvider>
         </ThemeProvider>
       </SafeAreaProvider>
       {!splashDone && <AnimatedSplash onFinish={() => setSplashDone(true)} />}

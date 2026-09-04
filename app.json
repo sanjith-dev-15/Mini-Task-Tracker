@@ -16,7 +16,8 @@
         "backgroundColor": "#F26722"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.anonymous.App"
+      "package": "com.anonymous.App",
+      "googleServicesFile": "./google-services.json"
     },
     "web": {
       "output": "static",
@@ -47,7 +48,10 @@
           "color": "#F26722"
         }
       ],
-      "./plugins/withReleaseSigning"
+      "./plugins/withReleaseSigning",
+      "@react-native-firebase/app",
+      "@react-native-firebase/auth",
+      "@react-native-google-signin/google-signin"
     ],
     "experiments": {
       "typedRoutes": true,

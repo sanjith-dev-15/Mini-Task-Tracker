@@ -5,10 +5,16 @@ name: Android Release APK
 #
 # One-time setup — add these repo secrets
 # (Settings ▸ Secrets and variables ▸ Actions ▸ New repository secret):
-#   ANDROID_KEYSTORE_BASE64    base64 of your release.keystore file
-#   ANDROID_KEYSTORE_PASSWORD  store password
-#   ANDROID_KEY_ALIAS          key alias
-#   ANDROID_KEY_PASSWORD       key password
+#   ANDROID_KEYSTORE_BASE64      base64 of your release.keystore file
+#   ANDROID_KEYSTORE_PASSWORD    store password
+#   ANDROID_KEY_ALIAS            key alias
+#   ANDROID_KEY_PASSWORD         key password
+#   GOOGLE_SERVICES_JSON_BASE64  base64 of google-services.json (Firebase console
+#                                 ▸ Project settings ▸ your Android app)
+#   TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID   optional build notification (see below)
+#
+#   base64 -w0 google-services.json   # value for GOOGLE_SERVICES_JSON_BASE64 (Linux/macOS)
+#   # PowerShell: [Convert]::ToBase64String([IO.File]::ReadAllBytes("google-services.json"))
 #
 # Generate the keystore once (back up the file + passwords — losing them means
 # users can no longer update-install over an existing build):
@@ -75,6 +81,11 @@ jobs:
             fs.writeFileSync(p, JSON.stringify(j, null, 2) + "\n");
             console.log("expo.android.versionCode =", j.expo.android.versionCode);
           '
+
+      - name: Decode google-services.json
+        run: |
+          echo "${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}" | base64 -d > google-services.json
+          test -s google-services.json || { echo "::error::GOOGLE_SERVICES_JSON_BASE64 secret is missing or empty"; exit 1; }
 
       - name: Expo prebuild (Android)
         run: npx expo prebuild --platform android --no-install --clean
@@ -177,15 +188,31 @@ jobs:
             echo "Telegram secrets not set — skipping notification."
             exit 0
           fi
-          text=$(printf '%s\n' \
+
+          caption=$(printf '%s\n' \
             "🟢 New Goku Android build is live" \
             "" \
             "Version $VERSION (build $RUN_NUMBER)" \
-            "Commit ${COMMIT:0:7} · $APK" \
-            "" \
-            "Install: https://github.com/$REPO/releases/tag/android-latest")
-          curl -sS --fail \
-            "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
-            --data-urlencode "chat_id=$TELEGRAM_CHAT_ID" \
-            --data-urlencode "text=$text" \
-            --data-urlencode "disable_web_page_preview=true"
+            "Commit ${COMMIT:0:7}")
+
+          # Telegram bots can only upload files up to 50MB; send the APK itself
+          # when it fits, otherwise fall back to a message with the download link.
+          size=$(stat -c%s "$APK")
+          limit=$((49 * 1024 * 1024))
+          if [ "$size" -le "$limit" ]; then
+            echo "Sending APK as a document ($((size / 1024 / 1024)) MB)"
+            curl -sS --fail \
+              "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendDocument" \
+              -F "chat_id=$TELEGRAM_CHAT_ID" \
+              -F "caption=$caption" \
+              -F "document=@$APK"
+          else
+            echo "APK is $((size / 1024 / 1024)) MB — over Telegram's 50MB upload limit, sending a link instead"
+            text=$(printf '%s\n%s\n' "$caption" "" \
+              "Install: https://github.com/$REPO/releases/tag/android-latest")
+            curl -sS --fail \
+              "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+              --data-urlencode "chat_id=$TELEGRAM_CHAT_ID" \
+              --data-urlencode "text=$text" \
+              --data-urlencode "disable_web_page_preview=true"
+          fi

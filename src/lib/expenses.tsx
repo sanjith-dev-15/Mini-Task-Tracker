@@ -10,6 +10,8 @@ import {
   type ReactNode,
 } from 'react';
 
+import { useAuth } from '@/lib/auth';
+import { mergeExpenses, mergeIncome, pullExpenseCloud, pushExpenseCloud } from '@/lib/expense-cloud';
 import { createId } from '@/lib/notes';
 import type { CategoryKey } from '@/lib/expense-categories';
 
@@ -62,6 +64,8 @@ type ExpensesContextValue = {
   income: Record<string, number>;
   /** Set (or clear, when `amount <= 0`) the income for a month. Defaults to now. */
   setMonthlyIncome: (amount: number, ref?: number) => void;
+  /** Cloud backup state (see `@/lib/auth` for sign-in/out). */
+  syncStatus: 'off' | 'syncing' | 'synced' | 'error';
 };
 
 const ExpensesContext = createContext<ExpensesContextValue | null>(null);
@@ -71,6 +75,22 @@ export function ExpensesProvider({ children }: { children: ReactNode }) {
   const [income, setIncome] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const hydrated = useRef(false);
+
+  const { user } = useAuth();
+  // Only meaningful while `user` is set — exposed as 'off' below otherwise, so
+  // signing out never needs an effect to reset this back to 'off'.
+  const [cloudStatus, setCloudStatus] = useState<'syncing' | 'synced' | 'error'>('synced');
+  // Always-current mirrors, so the sign-in effect can read the latest local
+  // state without depending on (and re-running for) every local edit.
+  const expensesRef = useRef(expenses);
+  const incomeRef = useRef(income);
+  useEffect(() => {
+    expensesRef.current = expenses;
+  });
+  useEffect(() => {
+    incomeRef.current = income;
+  });
+  const pushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -102,6 +122,56 @@ export function ExpensesProvider({ children }: { children: ReactNode }) {
       console.warn('Failed to save income', e),
     );
   }, [income]);
+
+  // On sign-in: pull the cloud copy once, merge it into whatever's on this
+  // device (newest `updatedAt` wins per expense; income merges by month), then
+  // push the merged result back up so every device converges on it. On sign-out
+  // the local data simply stops mirroring — nothing is deleted from the device.
+  useEffect(() => {
+    if (!user || loading) return;
+    let alive = true;
+    (async () => {
+      setCloudStatus('syncing');
+      try {
+        const remote = await pullExpenseCloud(user.uid);
+        if (!alive) return;
+        const mergedExpenses = remote
+          ? mergeExpenses(expensesRef.current, remote.expenses)
+          : expensesRef.current;
+        const mergedIncome = remote
+          ? mergeIncome(incomeRef.current, remote.income)
+          : incomeRef.current;
+        setExpenses(mergedExpenses);
+        setIncome(mergedIncome);
+        await pushExpenseCloud(user.uid, { expenses: mergedExpenses, income: mergedIncome });
+        if (alive) setCloudStatus('synced');
+      } catch (e) {
+        console.warn('Expense cloud sync failed', e);
+        if (alive) setCloudStatus('error');
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [user, loading]);
+
+  // Debounced push of every local edit while signed in.
+  useEffect(() => {
+    if (!hydrated.current || !user) return;
+    if (pushTimer.current) clearTimeout(pushTimer.current);
+    pushTimer.current = setTimeout(() => {
+      setCloudStatus('syncing');
+      pushExpenseCloud(user.uid, { expenses, income })
+        .then(() => setCloudStatus('synced'))
+        .catch((e) => {
+          console.warn('Expense cloud push failed', e);
+          setCloudStatus('error');
+        });
+    }, 1500);
+    return () => {
+      if (pushTimer.current) clearTimeout(pushTimer.current);
+    };
+  }, [expenses, income, user]);
 
   const getExpense = useCallback(
     (id: string) => expenses.find((e) => e.id === id),
@@ -152,8 +222,20 @@ export function ExpensesProvider({ children }: { children: ReactNode }) {
       deleteExpense,
       income,
       setMonthlyIncome,
+      syncStatus: user ? cloudStatus : 'off',
     }),
-    [sorted, loading, getExpense, addExpense, updateExpense, deleteExpense, income, setMonthlyIncome],
+    [
+      sorted,
+      loading,
+      getExpense,
+      addExpense,
+      updateExpense,
+      deleteExpense,
+      income,
+      setMonthlyIncome,
+      user,
+      cloudStatus,
+    ],
   );
 
   return <ExpensesContext.Provider value={value}>{children}</ExpensesContext.Provider>;
