@@ -18,6 +18,11 @@ expo-env.d.ts
 *.key
 *.mobileprovision
 
+# Firebase per-project config — not secret, but project-specific; each dev/CI
+# environment supplies its own (see AGENTS.md / android-release workflow).
+google-services.json
+GoogleService-Info.plist
+
 # Metro
 .metro-health-check*
 

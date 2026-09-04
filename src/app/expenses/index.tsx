@@ -1,8 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { DrawerToggleButton } from 'expo-router/drawer';
 import { useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
   Modal,
@@ -21,6 +23,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { useAuth } from '@/lib/auth';
 import { categoryOf } from '@/lib/expense-categories';
 import {
   currentMonthName,
@@ -44,6 +47,8 @@ export default function ExpensesScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const { expenses, loading, income, setMonthlyIncome } = useExpenses();
+  const { user } = useAuth();
+  const [showAccount, setShowAccount] = useState(false);
 
   const monthName = currentMonthName();
   const monthIncome = income[monthKey()] ?? 0;
@@ -101,6 +106,27 @@ export default function ExpensesScreen() {
         <ThemedText type="subtitle" style={styles.flex}>
           Expenses
         </ThemedText>
+        <Pressable
+          onPress={() => setShowAccount(true)}
+          accessibilityRole="button"
+          accessibilityLabel={user ? 'Account and backup' : 'Back up to Google'}
+          style={styles.accountBtn}>
+          {user ? (
+            user.photoURL ? (
+              <Image source={{ uri: user.photoURL }} style={styles.avatar} />
+            ) : (
+              <View style={[styles.avatarFallback, { backgroundColor: theme.accent }]}>
+                <ThemedText type="smallBold" style={{ color: '#fff' }}>
+                  {(user.name ?? user.email ?? '?').charAt(0).toUpperCase()}
+                </ThemedText>
+              </View>
+            )
+          ) : (
+            <View style={[styles.avatarFallback, { backgroundColor: theme.backgroundElement }]}>
+              <Ionicons name="cloud-outline" size={16} color={theme.textSecondary} />
+            </View>
+          )}
+        </Pressable>
         <View style={[styles.monthPill, { backgroundColor: theme.backgroundElement }]}>
           <ThemedText type="smallBold" themeColor="textSecondary">
             {monthName}
@@ -408,7 +434,119 @@ export default function ExpensesScreen() {
           </Pressable>
         </KeyboardAvoidingView>
       </Modal>
+
+      <AccountSheet visible={showAccount} onClose={() => setShowAccount(false)} />
     </ThemedView>
+  );
+}
+
+const SYNC_LABEL: Record<'off' | 'syncing' | 'synced' | 'error', string> = {
+  off: '',
+  syncing: 'Syncing…',
+  synced: 'Backed up',
+  error: 'Sync failed — will retry',
+};
+
+/** Sign in/out + backup-status sheet for the expense tracker's Google backup. */
+function AccountSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
+  const theme = useTheme();
+  const { user, busy, error, signInWithGoogle, signOut } = useAuth();
+  const { syncStatus } = useExpenses();
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={styles.modalScrim} onPress={onClose}>
+        <Pressable
+          style={[styles.modalCard, { backgroundColor: theme.card, borderColor: theme.border }]}
+          onPress={() => {}}>
+          <View style={styles.modalHead}>
+            <ThemedText type="subtitle">{user ? 'Account' : 'Back up your expenses'}</ThemedText>
+            <Pressable onPress={onClose} hitSlop={8}>
+              <Ionicons name="close" size={22} color={theme.textSecondary} />
+            </Pressable>
+          </View>
+
+          {user ? (
+            <>
+              <View style={styles.accountRow}>
+                {user.photoURL ? (
+                  <Image source={{ uri: user.photoURL }} style={styles.accountAvatar} />
+                ) : (
+                  <View style={[styles.accountAvatar, { backgroundColor: theme.accent }]}>
+                    <ThemedText type="subtitle" style={{ color: '#fff' }}>
+                      {(user.name ?? user.email ?? '?').charAt(0).toUpperCase()}
+                    </ThemedText>
+                  </View>
+                )}
+                <View style={styles.flex}>
+                  <ThemedText numberOfLines={1}>{user.name ?? user.email ?? 'Signed in'}</ThemedText>
+                  {user.email && (
+                    <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
+                      {user.email}
+                    </ThemedText>
+                  )}
+                </View>
+              </View>
+
+              <View style={styles.syncRow}>
+                {syncStatus === 'syncing' ? (
+                  <ActivityIndicator size="small" color={theme.textSecondary} />
+                ) : (
+                  <Ionicons
+                    name={syncStatus === 'error' ? 'alert-circle-outline' : 'cloud-done-outline'}
+                    size={14}
+                    color={syncStatus === 'error' ? theme.danger : theme.textSecondary}
+                  />
+                )}
+                <ThemedText
+                  type="small"
+                  style={{ color: syncStatus === 'error' ? theme.danger : theme.textSecondary }}>
+                  {SYNC_LABEL[syncStatus]}
+                </ThemedText>
+              </View>
+
+              <Pressable
+                onPress={signOut}
+                disabled={busy}
+                style={[styles.accountBtnWide, { backgroundColor: theme.backgroundElement }]}>
+                {busy ? (
+                  <ActivityIndicator size="small" color={theme.text} />
+                ) : (
+                  <ThemedText type="smallBold">Sign out</ThemedText>
+                )}
+              </Pressable>
+            </>
+          ) : (
+            <>
+              <ThemedText type="small" themeColor="textSecondary">
+                Sign in with Google to keep your expenses and monthly income backed up and
+                available if you switch phones.
+              </ThemedText>
+              <Pressable
+                onPress={signInWithGoogle}
+                disabled={busy}
+                style={[styles.accountBtnWide, { backgroundColor: theme.accent, opacity: busy ? 0.7 : 1 }]}>
+                {busy ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <>
+                    <Ionicons name="logo-google" size={16} color="#fff" />
+                    <ThemedText type="smallBold" style={{ color: '#fff' }}>
+                      Sign in with Google
+                    </ThemedText>
+                  </>
+                )}
+              </Pressable>
+              {error && (
+                <ThemedText type="small" style={{ color: theme.danger }}>
+                  {error}
+                </ThemedText>
+              )}
+            </>
+          )}
+        </Pressable>
+      </Pressable>
+    </Modal>
   );
 }
 
@@ -469,6 +607,15 @@ const styles = StyleSheet.create({
     height: 24,
     borderRadius: 12,
     paddingHorizontal: Spacing.two,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  accountBtn: { marginRight: Spacing.two },
+  avatar: { width: 28, height: 28, borderRadius: 14 },
+  avatarFallback: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -648,4 +795,24 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.one,
   },
   modalClear: { alignSelf: 'center', paddingTop: Spacing.two },
+
+  // account sheet
+  accountRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three },
+  accountAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  syncRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one + 2 },
+  accountBtnWide: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.two,
+    height: 46,
+    borderRadius: 12,
+    marginTop: Spacing.one,
+  },
 });
