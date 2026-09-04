@@ -16,6 +16,7 @@ type Props = ViewProps & {
  * card everywhere else — designed to sit over the tinted "bloom" blobs on the
  * expenses screens so the fallback still reads as glass-over-colour.
  */
+
 export function GlassSurface({
   style,
   glass = 'regular',
