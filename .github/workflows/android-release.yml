@@ -58,11 +58,14 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
+      # ubuntu-latest ships the Android SDK (ANDROID_HOME is set), so we use its
+      # sdkmanager directly — android-actions/setup-android re-downloads
+      # cmdline-tools and was failing on that.
       - name: Install NDK + CMake
-        run: sdkmanager "ndk;27.1.12297006" "cmake;3.22.1"
+        run: |
+          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$sdkmanager" --licenses > /dev/null || true
+          "$sdkmanager" "ndk;27.1.12297006" "cmake;3.22.1"
 
       - name: Setup Gradle (with cache)
         uses: gradle/actions/setup-gradle@v4
