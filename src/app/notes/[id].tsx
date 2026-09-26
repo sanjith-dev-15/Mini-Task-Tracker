@@ -16,6 +16,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { goBack } from '@/lib/navigation';
 import { createId, useNotes, type Note, type TodoItem } from '@/lib/notes';
 
 function isBlank(note: Note): boolean {
@@ -83,7 +84,7 @@ export default function NoteEditorScreen() {
   return (
     <ThemedView style={styles.screen}>
       <View style={[styles.header, { paddingTop: insets.top + Spacing.one }]}>
-        <Pressable onPress={() => router.back()} hitSlop={12} style={styles.headerBtn}>
+        <Pressable onPress={() => goBack('/notes')} hitSlop={12} style={styles.headerBtn}>
           <ThemedText style={[styles.chevron, { color: theme.accent }]}>‹ Notes</ThemedText>
         </Pressable>
         <Pressable onPress={confirmDelete} hitSlop={12} style={styles.headerBtn}>

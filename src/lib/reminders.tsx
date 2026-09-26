@@ -13,6 +13,18 @@ import {
 import { createId } from '@/lib/notes';
 
 const STORAGE_KEY = 'reminders:v1';
+const VIEW_KEY = 'reminders:view';
+const SORT_KEY = 'reminders:sort';
+
+/** How the Home reminders list is laid out. */
+export type ReminderViewMode = 'grid' | 'compact' | 'detail' | 'notes';
+
+const VIEW_MODES: ReminderViewMode[] = ['grid', 'compact', 'detail', 'notes'];
+
+/** Order the Home reminders list is sorted in (done ones always sink to the bottom). */
+export type ReminderSortMode = 'due' | 'updated' | 'created' | 'title';
+
+const SORT_MODES: ReminderSortMode[] = ['due', 'updated', 'created', 'title'];
 
 export type ReminderLocation = {
   lat: number;
@@ -64,17 +76,29 @@ type RemindersContextValue = {
   updateReminder: (id: string, patch: ReminderPatch) => void;
   deleteReminder: (id: string) => void;
   toggleDone: (id: string) => void;
+  viewMode: ReminderViewMode;
+  setViewMode: (mode: ReminderViewMode) => void;
+  sortMode: ReminderSortMode;
+  setSortMode: (mode: ReminderSortMode) => void;
 };
 
 const RemindersContext = createContext<RemindersContextValue | null>(null);
 
-/** not-done first, then soonest due (no date last), then most recently touched. */
-function compareReminders(a: Reminder, b: Reminder): number {
+/** Not-done first, then by `mode`, falling back to most recently touched. */
+function compareReminders(a: Reminder, b: Reminder, mode: ReminderSortMode): number {
   if (a.done !== b.done) return a.done ? 1 : -1;
-  if (a.dueAt !== b.dueAt) {
+  if (mode === 'due' && a.dueAt !== b.dueAt) {
+    // Soonest first; no date last.
     if (a.dueAt == null) return 1;
     if (b.dueAt == null) return -1;
     return a.dueAt - b.dueAt;
+  }
+  if (mode === 'created' && a.createdAt !== b.createdAt) return b.createdAt - a.createdAt;
+  if (mode === 'title') {
+    const byTitle = (a.title.trim() || '￿').localeCompare(b.title.trim() || '￿', undefined, {
+      sensitivity: 'base',
+    });
+    if (byTitle !== 0) return byTitle;
   }
   return b.updatedAt - a.updatedAt;
 }
@@ -82,15 +106,27 @@ function compareReminders(a: Reminder, b: Reminder): number {
 export function RemindersProvider({ children }: { children: ReactNode }) {
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [loading, setLoading] = useState(true);
+  const [viewMode, setViewModeState] = useState<ReminderViewMode>('detail');
+  const [sortMode, setSortModeState] = useState<ReminderSortMode>('due');
   const hydrated = useRef(false);
 
   useEffect(() => {
     (async () => {
       try {
-        const raw = await AsyncStorage.getItem(STORAGE_KEY);
-        if (raw) {
-          const parsed = JSON.parse(raw) as Reminder[];
+        const [raw, savedView, savedSort] = await AsyncStorage.multiGet([
+          STORAGE_KEY,
+          VIEW_KEY,
+          SORT_KEY,
+        ]);
+        if (raw[1]) {
+          const parsed = JSON.parse(raw[1]) as Reminder[];
           if (Array.isArray(parsed)) setReminders(parsed);
+        }
+        if (savedView[1] && VIEW_MODES.includes(savedView[1] as ReminderViewMode)) {
+          setViewModeState(savedView[1] as ReminderViewMode);
+        }
+        if (savedSort[1] && SORT_MODES.includes(savedSort[1] as ReminderSortMode)) {
+          setSortModeState(savedSort[1] as ReminderSortMode);
         }
       } catch (e) {
         console.warn('Failed to load reminders', e);
@@ -99,6 +135,16 @@ export function RemindersProvider({ children }: { children: ReactNode }) {
         setLoading(false);
       }
     })();
+  }, []);
+
+  const setViewMode = useCallback((mode: ReminderViewMode) => {
+    setViewModeState(mode);
+    AsyncStorage.setItem(VIEW_KEY, mode).catch(() => {});
+  }, []);
+
+  const setSortMode = useCallback((mode: ReminderSortMode) => {
+    setSortModeState(mode);
+    AsyncStorage.setItem(SORT_KEY, mode).catch(() => {});
   }, []);
 
   // Persist whenever reminders change (after the initial hydration).
@@ -136,7 +182,10 @@ export function RemindersProvider({ children }: { children: ReactNode }) {
     );
   }, []);
 
-  const sorted = useMemo(() => [...reminders].sort(compareReminders), [reminders]);
+  const sorted = useMemo(
+    () => [...reminders].sort((a, b) => compareReminders(a, b, sortMode)),
+    [reminders, sortMode],
+  );
 
   const value = useMemo<RemindersContextValue>(
     () => ({
@@ -147,8 +196,24 @@ export function RemindersProvider({ children }: { children: ReactNode }) {
       updateReminder,
       deleteReminder,
       toggleDone,
+      viewMode,
+      setViewMode,
+      sortMode,
+      setSortMode,
     }),
-    [sorted, loading, getReminder, createReminder, updateReminder, deleteReminder, toggleDone],
+    [
+      sorted,
+      loading,
+      getReminder,
+      createReminder,
+      updateReminder,
+      deleteReminder,
+      toggleDone,
+      viewMode,
+      setViewMode,
+      sortMode,
+      setSortMode,
+    ],
   );
 
   return <RemindersContext.Provider value={value}>{children}</RemindersContext.Provider>;

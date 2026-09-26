@@ -30,7 +30,7 @@ export const PERMISSIONS: PermissionInfo[] = [
     android: ['ACCESS_FINE_LOCATION', 'ACCESS_COARSE_LOCATION'],
     purpose: 'Centre the map on where you are and pin a reminder to a place.',
     detail:
-      'Read only while the app is open, and only when you tap “locate me” or drop a pin. It is never stored or sent anywhere.',
+      'Read only while the app is open, and only when you tap “locate me” or drop a pin. Your position is never stored. To show you the address of a spot you pin, that spot’s coordinate is sent to an address lookup — nothing else about you goes with it.',
     grant: 'runtime',
     optional: true,
   },
@@ -60,7 +60,8 @@ export const PERMISSIONS: PermissionInfo[] = [
     title: 'Network access',
     icon: 'wifi-outline',
     android: ['INTERNET', 'ACCESS_NETWORK_STATE'],
-    purpose: 'Download map tiles from OpenFreeMap and look up places you search.',
+    purpose:
+      'Download map tiles from OpenFreeMap, and turn the places you search or pin into an address.',
     detail:
       'Your notes, reminders, expenses and tasks live only on this device — there is no account, no server and no sync.',
     grant: 'install',

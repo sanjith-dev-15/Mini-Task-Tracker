@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -13,6 +13,7 @@ import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { CATEGORIES, categoryOf, type CategoryKey } from '@/lib/expense-categories';
 import { fullDayLabel, startOfDay, useExpenses } from '@/lib/expenses';
+import { goBack } from '@/lib/navigation';
 
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '0', 'back'] as const;
 const DAY_MS = 86_400_000;
@@ -59,7 +60,7 @@ export default function ExpenseFormScreen() {
     return (
       <ThemedView style={[styles.screen, styles.centered]}>
         <ThemedText themeColor="textSecondary">This expense no longer exists.</ThemedText>
-        <Pressable onPress={() => router.back()} style={styles.linkBtn}>
+        <Pressable onPress={() => goBack('/expenses')} style={styles.linkBtn}>
           <ThemedText style={{ color: theme.accent }}>Go back</ThemedText>
         </Pressable>
       </ThemedView>
@@ -83,7 +84,7 @@ export default function ExpenseFormScreen() {
     const patch = { amount, category, title: title.trim(), spentAt };
     if (existing) updateExpense(existing.id, patch);
     else addExpense(patch);
-    router.back();
+    goBack('/expenses');
   };
 
   const confirmDelete = () =>
@@ -94,7 +95,7 @@ export default function ExpenseFormScreen() {
         style: 'destructive',
         onPress: () => {
           if (existing) deleteExpense(existing.id);
-          router.back();
+          goBack('/expenses');
         },
       },
     ]);
@@ -109,7 +110,7 @@ export default function ExpenseFormScreen() {
         <GlassIconButton
           name="chevron-down"
           color={theme.text}
-          onPress={() => router.back()}
+          onPress={() => goBack('/expenses')}
           accessibilityLabel="Close"
         />
         <ThemedText type="subtitle">{editing ? 'Edit expense' : 'New expense'}</ThemedText>

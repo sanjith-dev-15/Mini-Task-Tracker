@@ -4,6 +4,7 @@ import { BackHandler, StyleSheet } from 'react-native';
 
 import { ReminderMap } from '@/components/reminder-map';
 import { ThemedView } from '@/components/themed-view';
+import { goBack } from '@/lib/navigation';
 import { useReminders, type ReminderLocation } from '@/lib/reminders';
 
 /**
@@ -23,15 +24,19 @@ export default function MapScreen() {
 
   // In pick mode we were pushed from the editor, so pop back to it. Otherwise
   // we're only reachable from the Home map — return there.
+  // Fall back to the editor if a reload left no history.
   const close = useCallback(
-    () => (picking ? router.back() : router.replace('/')),
-    [picking],
+    () =>
+      pickFor
+        ? goBack({ pathname: '/reminder/[id]', params: { id: pickFor } })
+        : router.replace('/'),
+    [pickFor],
   );
 
   const choose = (coord: ReminderLocation) => {
     if (pickFor) {
       updateReminder(pickFor, { location: coord });
-      router.back();
+      close();
     } else {
       // `fresh` → the editor drops it on exit unless it's named (see [id].tsx).
       router.push({

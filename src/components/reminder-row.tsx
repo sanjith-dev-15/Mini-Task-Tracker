@@ -5,46 +5,135 @@ import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { formatDue, isOverdue } from '@/lib/reminder-dates';
-import type { Reminder } from '@/lib/reminders';
+import type { Reminder, ReminderViewMode } from '@/lib/reminders';
 
-export function ReminderRow({
-  reminder,
-  onPress,
-  onEdit,
-  onDelete,
-  onToggle,
-}: {
+/**
+ * One reminder in the Home list.
+ * - `compact`: title only, tighter row.
+ * - `detail` (default): title + due date / place.
+ * - `notes`: detail plus a preview of the saved notes.
+ * - `grid`: a card for a two-column grid (see {@link ReminderTile}).
+ */
+export function ReminderRow(props: RowProps) {
+  if (props.variant === 'grid') return <ReminderTile {...props} />;
+  return <ListRow {...props} />;
+}
+
+type RowProps = {
   reminder: Reminder;
+  variant?: ReminderViewMode;
   onPress: () => void;
   onEdit: () => void;
   onDelete: () => void;
   onToggle: () => void;
-}) {
+};
+
+function Checkbox({ done, onToggle }: { done: boolean; onToggle: () => void }) {
+  const theme = useTheme();
+  return (
+    <Pressable
+      onPress={onToggle}
+      hitSlop={10}
+      accessibilityRole="checkbox"
+      accessibilityState={{ checked: done }}
+      style={[
+        styles.checkbox,
+        {
+          borderColor: done ? theme.accent : theme.border,
+          backgroundColor: done ? theme.accent : 'transparent',
+        },
+      ]}>
+      {done && <Ionicons name="checkmark" size={14} color="#fff" />}
+    </Pressable>
+  );
+}
+
+function locationText(location: NonNullable<Reminder['location']>): string {
+  return location.label ?? `${location.lat.toFixed(3)}, ${location.lng.toFixed(3)}`;
+}
+
+/** Grid card: checkbox + delete on top, then title, due, place and a notes preview. */
+function ReminderTile({ reminder, onPress, onDelete, onToggle }: RowProps) {
   const theme = useTheme();
   const { done, dueAt, location, title } = reminder;
   const overdue = isOverdue(dueAt, done);
+  const notes = reminder.notes.trim();
+
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.tile,
+        { backgroundColor: theme.card, borderColor: theme.border, opacity: pressed ? 0.7 : 1 },
+      ]}>
+      <View style={styles.tileTop}>
+        <Checkbox done={done} onToggle={onToggle} />
+        <Pressable
+          onPress={onDelete}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Delete reminder"
+          style={({ pressed }) => [styles.actionBtn, pressed && { opacity: 0.5 }]}>
+          <Ionicons name="trash-outline" size={16} color={theme.danger} />
+        </Pressable>
+      </View>
+
+      <ThemedText
+        type="smallBold"
+        numberOfLines={2}
+        themeColor={done ? 'textSecondary' : 'text'}
+        style={[styles.tileTitle, done && styles.strike]}>
+        {title.trim() || 'Untitled reminder'}
+      </ThemedText>
+
+      {dueAt != null && (
+        <ThemedText
+          type="small"
+          numberOfLines={1}
+          style={{ color: overdue ? theme.danger : theme.textSecondary }}>
+          {formatDue(dueAt)}
+        </ThemedText>
+      )}
+      {location != null && (
+        <View style={[styles.locChip, styles.tileLoc]}>
+          <Ionicons name="location-outline" size={12} color={theme.textSecondary} />
+          <ThemedText type="small" themeColor="textSecondary" numberOfLines={1} style={styles.flex}>
+            {locationText(location)}
+          </ThemedText>
+        </View>
+      )}
+      {notes ? (
+        <ThemedText type="small" themeColor="textSecondary" numberOfLines={4} style={styles.notes}>
+          {notes}
+        </ThemedText>
+      ) : null}
+    </Pressable>
+  );
+}
+
+function ListRow({
+  reminder,
+  variant = 'detail',
+  onPress,
+  onEdit,
+  onDelete,
+  onToggle,
+}: RowProps) {
+  const theme = useTheme();
+  const { done, dueAt, location, title } = reminder;
+  const overdue = isOverdue(dueAt, done);
+  const compact = variant === 'compact';
+  const notes = variant === 'notes' ? reminder.notes.trim() : '';
 
   return (
     <Pressable
       onPress={onPress}
       style={({ pressed }) => [
         styles.row,
+        compact && styles.rowCompact,
         { backgroundColor: theme.card, borderColor: theme.border, opacity: pressed ? 0.7 : 1 },
       ]}>
-      <Pressable
-        onPress={onToggle}
-        hitSlop={10}
-        accessibilityRole="checkbox"
-        accessibilityState={{ checked: done }}
-        style={[
-          styles.checkbox,
-          {
-            borderColor: done ? theme.accent : theme.border,
-            backgroundColor: done ? theme.accent : 'transparent',
-          },
-        ]}>
-        {done && <Ionicons name="checkmark" size={14} color="#fff" />}
-      </Pressable>
+      <Checkbox done={done} onToggle={onToggle} />
 
       <View style={styles.body}>
         <ThemedText
@@ -54,7 +143,7 @@ export function ReminderRow({
           {title.trim() || 'Untitled reminder'}
         </ThemedText>
 
-        {(dueAt != null || location != null) && (
+        {!compact && (dueAt != null || location != null) && (
           <View style={styles.meta}>
             {dueAt != null && (
               <ThemedText
@@ -67,12 +156,18 @@ export function ReminderRow({
               <View style={styles.locChip}>
                 <Ionicons name="location-outline" size={12} color={theme.textSecondary} />
                 <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
-                  {location.label ?? `${location.lat.toFixed(3)}, ${location.lng.toFixed(3)}`}
+                  {locationText(location)}
                 </ThemedText>
               </View>
             )}
           </View>
         )}
+
+        {notes ? (
+          <ThemedText type="small" themeColor="textSecondary" numberOfLines={3} style={styles.notes}>
+            {notes}
+          </ThemedText>
+        ) : null}
       </View>
 
       <View style={styles.actions}>
@@ -107,6 +202,24 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.two + 2,
     paddingHorizontal: Spacing.three,
   },
+  rowCompact: { paddingVertical: Spacing.two },
+  tile: {
+    flex: 1,
+    minHeight: 132,
+    gap: Spacing.one,
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: Spacing.three,
+  },
+  tileTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: Spacing.one,
+  },
+  tileTitle: { fontSize: 15 },
+  tileLoc: { maxWidth: '100%' },
+  flex: { flex: 1 },
   checkbox: {
     width: 22,
     height: 22,
@@ -117,6 +230,7 @@ const styles = StyleSheet.create({
   },
   body: { flex: 1, gap: 2 },
   strike: { textDecorationLine: 'line-through' },
+  notes: { marginTop: 2 },
   meta: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two, flexWrap: 'wrap' },
   locChip: { flexDirection: 'row', alignItems: 'center', gap: 3, maxWidth: '70%' },
   actions: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one },

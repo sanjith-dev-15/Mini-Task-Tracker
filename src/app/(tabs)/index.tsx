@@ -1,20 +1,48 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { DrawerToggleButton } from 'expo-router/drawer';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GlassAlert } from '@/components/glass-alert';
+import { OptionsMenu } from '@/components/options-menu';
 import { ReminderMap } from '@/components/reminder-map';
 import { ReminderRow } from '@/components/reminder-row';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { useReminders } from '@/lib/reminders';
+import {
+  useReminders,
+  type Reminder,
+  type ReminderSortMode,
+  type ReminderViewMode,
+} from '@/lib/reminders';
 
 const WIDE_BREAKPOINT = 720;
+
+const VIEW_OPTIONS: {
+  mode: ReminderViewMode;
+  label: string;
+  icon: keyof typeof Ionicons.glyphMap;
+}[] = [
+  { mode: 'grid', label: 'Grid', icon: 'grid-outline' },
+  { mode: 'compact', label: 'Compact', icon: 'list-outline' },
+  { mode: 'detail', label: 'Detail', icon: 'reorder-four-outline' },
+  { mode: 'notes', label: 'With notes', icon: 'document-text-outline' },
+];
+
+const SORT_OPTIONS: {
+  mode: ReminderSortMode;
+  label: string;
+  icon: keyof typeof Ionicons.glyphMap;
+}[] = [
+  { mode: 'due', label: 'Due date', icon: 'alarm-outline' },
+  { mode: 'updated', label: 'Last edited', icon: 'time-outline' },
+  { mode: 'created', label: 'Date created', icon: 'calendar-outline' },
+  { mode: 'title', label: 'Title (A–Z)', icon: 'text-outline' },
+];
 
 /**
  * Home — route "/". The app dashboard: a map (pins for located reminders) and
@@ -24,7 +52,23 @@ export default function HomeScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
-  const { reminders, loading, createReminder, toggleDone, deleteReminder } = useReminders();
+  const {
+    reminders,
+    loading,
+    createReminder,
+    toggleDone,
+    deleteReminder,
+    viewMode,
+    setViewMode,
+    sortMode,
+    setSortMode,
+  } = useReminders();
+
+  // The ⋯ menu drops down from wherever its button currently sits.
+  const menuBtn = useRef<View>(null);
+  const [menuTop, setMenuTop] = useState<number | null>(null);
+  const openMenu = () =>
+    menuBtn.current?.measureInWindow((_x, y, _w, h) => setMenuTop(y + h + Spacing.one));
 
   const wide = width >= WIDE_BREAKPOINT;
   const mapHeight = Math.min(Math.round(height * 0.32), 300);
@@ -45,11 +89,20 @@ export default function HomeScreen() {
 
   const pending = reminders.filter((r) => !r.done).length;
 
+  const grid = viewMode === 'grid';
+  // Pad an odd grid with an empty cell so the last card keeps half width.
+  const rows: (Reminder | null)[] =
+    grid && reminders.length % 2 === 1 ? [...reminders, null] : reminders;
+
   const list = (
     <FlatList
+      // Switching column count needs a fresh list instance.
+      key={grid ? 'grid' : 'list'}
+      numColumns={grid ? 2 : 1}
+      columnWrapperStyle={grid ? styles.gridRow : undefined}
       style={styles.flex}
-      data={reminders}
-      keyExtractor={(r) => r.id}
+      data={rows}
+      keyExtractor={(r) => r?.id ?? 'filler'}
       contentContainerStyle={[
         styles.listContent,
         { paddingBottom: insets.bottom + Spacing.six + Spacing.six },
@@ -61,15 +114,20 @@ export default function HomeScreen() {
           {loading ? 'Loading…' : 'Tap + to add your first reminder.'}
         </ThemedText>
       }
-      renderItem={({ item }) => (
-        <ReminderRow
-          reminder={item}
-          onPress={() => openReminder(item.id)}
-          onEdit={() => openReminder(item.id)}
-          onDelete={() => setPendingDelete({ id: item.id, title: item.title })}
-          onToggle={() => toggleDone(item.id)}
-        />
-      )}
+      renderItem={({ item }) =>
+        item == null ? (
+          <View style={styles.flex} />
+        ) : (
+          <ReminderRow
+            reminder={item}
+            onPress={() => openReminder(item.id)}
+            onEdit={() => openReminder(item.id)}
+            onDelete={() => setPendingDelete({ id: item.id, title: item.title })}
+            onToggle={() => toggleDone(item.id)}
+            variant={viewMode}
+          />
+        )
+      }
     />
   );
 
@@ -103,9 +161,51 @@ export default function HomeScreen() {
         {map}
         <View
           style={[styles.flex, wide ? styles.listPaneWide : styles.listPaneStacked]}>
+          <View style={styles.listHeader}>
+            <ThemedText type="smallBold" themeColor="textSecondary" style={styles.listTitle}>
+              REMINDERS
+            </ThemedText>
+            <Pressable
+              ref={menuBtn}
+              onPress={openMenu}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="View and sort options"
+              style={({ pressed }) => [styles.menuBtn, pressed && { opacity: 0.5 }]}>
+              <Ionicons name="ellipsis-vertical" size={18} color={theme.text} />
+            </Pressable>
+          </View>
           {list}
         </View>
       </View>
+
+      <OptionsMenu
+        visible={menuTop != null}
+        top={menuTop ?? 0}
+        onClose={() => setMenuTop(null)}
+        sections={[
+          {
+            title: 'VIEW',
+            options: VIEW_OPTIONS.map((opt) => ({
+              key: opt.mode,
+              label: opt.label,
+              icon: opt.icon,
+              active: viewMode === opt.mode,
+              onPress: () => setViewMode(opt.mode),
+            })),
+          },
+          {
+            title: 'SORT BY',
+            options: SORT_OPTIONS.map((opt) => ({
+              key: opt.mode,
+              label: opt.label,
+              icon: opt.icon,
+              active: sortMode === opt.mode,
+              onPress: () => setSortMode(opt.mode),
+            })),
+          },
+        ]}
+      />
 
       <Pressable
         accessibilityLabel="New reminder"
@@ -168,9 +268,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
   },
   row: { flexDirection: 'row', gap: Spacing.three },
-  listPaneStacked: { marginTop: Spacing.three },
+  listPaneStacked: { marginTop: Spacing.two },
+  listHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingLeft: Spacing.one,
+    marginBottom: Spacing.one,
+  },
+  listTitle: { flex: 1, letterSpacing: 1 },
+  menuBtn: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
   listPaneWide: { flex: 0, width: 360 },
   listContent: { gap: Spacing.two, flexGrow: 1 },
+  gridRow: { gap: Spacing.two },
   empty: { textAlign: 'center', marginTop: Spacing.six },
   fab: {
     position: 'absolute',
