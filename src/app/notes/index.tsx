@@ -2,19 +2,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { DrawerToggleButton } from 'expo-router/drawer';
 import { useMemo, useState } from 'react';
-import {
-  Alert,
-  FlatList,
-  Modal,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  TextInput,
-  View,
-} from 'react-native';
+import { Alert, FlatList, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { GlassSurface } from '@/components/glass-surface';
+import { OptionsMenu } from '@/components/options-menu';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
@@ -155,51 +146,33 @@ export default function NotesListScreen() {
         </View>
       </View>
 
-      <Modal
+      <OptionsMenu
         visible={menuOpen}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setMenuOpen(false)}>
-        <Pressable style={styles.menuScrim} onPress={() => setMenuOpen(false)}>
-          <Pressable onPress={() => {}} style={[styles.menuAnchor, { top: insets.top + 44 }]}>
-            <GlassSurface glass="regular" radius={20} style={styles.menu}>
-              <ThemedText type="smallBold" themeColor="textSecondary" style={styles.menuSection}>
-                VIEW
-              </ThemedText>
-              {VIEW_OPTIONS.map((opt) => (
-                <MenuRow
-                  key={opt.mode}
-                  icon={opt.icon}
-                  label={opt.label}
-                  active={viewMode === opt.mode}
-                  onPress={() => {
-                    setViewMode(opt.mode);
-                    setMenuOpen(false);
-                  }}
-                />
-              ))}
-
-              <View style={[styles.menuDivider, { backgroundColor: theme.border }]} />
-
-              <ThemedText type="smallBold" themeColor="textSecondary" style={styles.menuSection}>
-                SORT BY
-              </ThemedText>
-              {SORT_OPTIONS.map((opt) => (
-                <MenuRow
-                  key={opt.mode}
-                  icon={opt.icon}
-                  label={opt.label}
-                  active={sortMode === opt.mode}
-                  onPress={() => {
-                    setSortMode(opt.mode);
-                    setMenuOpen(false);
-                  }}
-                />
-              ))}
-            </GlassSurface>
-          </Pressable>
-        </Pressable>
-      </Modal>
+        top={insets.top + 44}
+        onClose={() => setMenuOpen(false)}
+        sections={[
+          {
+            title: 'VIEW',
+            options: VIEW_OPTIONS.map((opt) => ({
+              key: opt.mode,
+              label: opt.label,
+              icon: opt.icon,
+              active: viewMode === opt.mode,
+              onPress: () => setViewMode(opt.mode),
+            })),
+          },
+          {
+            title: 'SORT BY',
+            options: SORT_OPTIONS.map((opt) => ({
+              key: opt.mode,
+              label: opt.label,
+              icon: opt.icon,
+              active: sortMode === opt.mode,
+              onPress: () => setSortMode(opt.mode),
+            })),
+          },
+        ]}
+      />
 
       <View style={[styles.page, styles.listArea]}>
         {filtered.length === 0 ? (
@@ -260,34 +233,6 @@ export default function NotesListScreen() {
         <Ionicons name="add" size={30} color="#fff" />
       </Pressable>
     </ThemedView>
-  );
-}
-
-/** One row in the three-dot overflow menu. */
-function MenuRow({
-  icon,
-  label,
-  active,
-  onPress,
-}: {
-  icon: keyof typeof Ionicons.glyphMap;
-  label: string;
-  active: boolean;
-  onPress: () => void;
-}) {
-  const theme = useTheme();
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityState={{ selected: active }}
-      onPress={onPress}
-      style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}>
-      <Ionicons name={icon} size={18} color={active ? theme.accent : theme.textSecondary} />
-      <ThemedText style={[styles.menuItemLabel, active && { color: theme.accent }]}>
-        {label}
-      </ThemedText>
-      {active && <Ionicons name="checkmark" size={17} color={theme.accent} />}
-    </Pressable>
   );
 }
 
@@ -458,45 +403,6 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.three,
   },
   searchInput: { flex: 1, fontSize: 16, height: '100%' },
-
-  // Overflow menu (three-dot) — liquid glass
-  menuScrim: { flex: 1, backgroundColor: 'rgba(0,0,0,0.28)' },
-  menuAnchor: {
-    position: 'absolute',
-    right: Spacing.three,
-    borderRadius: 20,
-    shadowColor: '#000',
-    shadowOpacity: 0.24,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 12,
-  },
-  menu: {
-    minWidth: 236,
-    paddingVertical: Spacing.two,
-  },
-  menuSection: {
-    letterSpacing: 1,
-    paddingHorizontal: Spacing.three,
-    paddingTop: Spacing.two,
-    paddingBottom: Spacing.one,
-    opacity: 0.9,
-  },
-  menuItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.three,
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.two + 2,
-  },
-  menuItemPressed: { backgroundColor: 'rgba(128,128,128,0.16)' },
-  menuItemLabel: { flex: 1, fontSize: 15 },
-  menuDivider: {
-    height: StyleSheet.hairlineWidth,
-    marginVertical: Spacing.one,
-    marginHorizontal: Spacing.three,
-    opacity: 0.6,
-  },
 
   listArea: { flex: 1 },
   empty: { textAlign: 'center', marginTop: Spacing.six },

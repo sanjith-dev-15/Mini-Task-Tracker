@@ -29,6 +29,7 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
+import { reverseGeocode, searchPlaces, type Suggestion } from '@/lib/geocode';
 import { formatDue, isOverdue } from '@/lib/reminder-dates';
 import { useThemeContext } from '@/lib/theme';
 import type { Reminder, ReminderLocation } from '@/lib/reminders';
@@ -58,77 +59,7 @@ const DEFAULT_CENTER: [number, number] = [78.9629, 20.5937]; // India
 const DEFAULT_ZOOM = 3.5;
 const PIN_ZOOM = 13;
 
-export type LatLng = { lat: number; lng: number };
-
-/**
- * Photon (photon.komoot.io) — OpenStreetMap geocoder built for type-ahead
- * search. Free, no API key. `lat`/`lon` bias results toward the map centre.
- */
-const PHOTON_SEARCH = 'https://photon.komoot.io/api/';
-const PHOTON_REVERSE = 'https://photon.komoot.io/reverse/';
-
-/** One row in the search autocomplete list. */
-type Suggestion = {
-  key: string;
-  /** Place name (primary line). */
-  name: string;
-  /** Humanised OSM category, e.g. "Cafe" — or null. */
-  category: string | null;
-  /** Full one-line address (secondary line). */
-  address: string;
-  lat: number;
-  lng: number;
-};
-
-const str = (v: unknown): string | null =>
-  typeof v === 'string' && v.trim() ? v.trim() : null;
-
-/** Humanise a Photon `osm_value`/`osm_key` (e.g. `fast_food` → "Fast food"). */
-function categoryLabel(p: Record<string, unknown>): string | null {
-  const raw = (str(p.osm_value) && p.osm_value !== 'yes' ? str(p.osm_value) : null) ?? str(p.osm_key);
-  if (!raw) return null;
-  const s = raw.replace(/_/g, ' ');
-  return s.charAt(0).toUpperCase() + s.slice(1);
-}
-
-/** Assemble a single-line address from a Photon feature's properties. */
-function addressLine(p: Record<string, unknown>): string {
-  const houseStreet = [str(p.housenumber), str(p.street)].filter(Boolean).join(' ');
-  return [houseStreet || null, str(p.city) ?? str(p.county), str(p.postcode), str(p.state), str(p.country)]
-    .filter((x): x is string => x != null)
-    .filter((x, i, a) => a.indexOf(x) === i)
-    .join(', ');
-}
-
-function placeName(p: Record<string, unknown>): string {
-  return str(p.name) ?? str(p.street) ?? str(p.city) ?? str(p.state) ?? str(p.country) ?? 'Unknown place';
-}
-
-function toSuggestion(f: GeoJSON.Feature, i: number): Suggestion | null {
-  const c = (f.geometry as GeoJSON.Point | undefined)?.coordinates;
-  if (!Array.isArray(c) || c.length < 2) return null;
-  const p = (f.properties ?? {}) as Record<string, unknown>;
-  return {
-    key: `${(p as { osm_id?: number }).osm_id ?? 'x'}-${i}`,
-    name: placeName(p),
-    category: categoryLabel(p),
-    address: addressLine(p),
-    lat: c[1],
-    lng: c[0],
-  };
-}
-
-/** Reverse-geocode a coordinate to a one-line address (or undefined). */
-async function reverseGeocode(lat: number, lng: number): Promise<string | undefined> {
-  try {
-    const res = await fetch(`${PHOTON_REVERSE}?lon=${lng}&lat=${lat}`);
-    const data: { features?: GeoJSON.Feature[] } = await res.json();
-    const p = (data.features?.[0]?.properties ?? {}) as Record<string, unknown>;
-    return addressLine(p) || str(p.name) || undefined;
-  } catch {
-    return undefined;
-  }
-}
+export type { LatLng } from '@/lib/geocode';
 
 /** Great-circle distance in km between two `[lng, lat]` points. */
 function distanceKm(a: [number, number], b: [number, number]): number {
@@ -311,17 +242,8 @@ export function ReminderMap({
     setSearching(true);
     try {
       const bias = centerRef.current ?? initialViewState.center;
-      const url =
-        PHOTON_SEARCH +
-        '?limit=5&lang=en&q=' +
-        encodeURIComponent(q) +
-        (bias ? `&lon=${bias[0]}&lat=${bias[1]}` : '');
-      const res = await fetch(url);
-      const data: { features?: GeoJSON.Feature[] } = await res.json();
+      const next = await searchPlaces(q, bias);
       if (reqId !== reqRef.current) return; // a newer keystroke superseded this
-      const next = (data.features ?? [])
-        .map(toSuggestion)
-        .filter((s): s is Suggestion => s != null);
       setResults(next);
       setNotFound(next.length === 0);
     } catch {

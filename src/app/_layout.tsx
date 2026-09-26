@@ -14,6 +14,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { AnimatedSplash } from '@/components/animated-splash';
+import { ArrivalModal } from '@/components/arrival-modal';
 import { GlassNav } from '@/components/glass-nav';
 import { Spacing } from '@/constants/theme';
 import { AuthProvider } from '@/lib/auth';
@@ -114,6 +115,7 @@ function ThemedRoot() {
           options={{ title: 'Map', drawerItemStyle: { display: 'none' } }}
         />
       </Drawer>
+      <ArrivalModal />
       <StatusBar style={isDark ? 'light' : 'dark'} />
     </NavThemeProvider>
   );

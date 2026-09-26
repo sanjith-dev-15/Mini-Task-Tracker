@@ -11,6 +11,8 @@
  * coordinates out of the returned HTML.
  */
 
+import { reverseGeocode } from '@/lib/geocode';
+
 const GOOGLE_HOST = /google\.[a-z.]+\/maps|goo\.gl|maps\.app\.goo\.gl|g\.co|glgoo\.gl/i;
 
 /** A desktop browser UA — Google serves a clean redirect + richer HTML to one. */
@@ -158,25 +160,6 @@ async function resolveGoogleUrl(url: string): Promise<{ lat: number; lng: number
     return null;
   } finally {
     clearTimeout(timeout);
-  }
-}
-
-/** Reverse-geocode to a one-line address (best effort). */
-async function reverseGeocode(lat: number, lng: number): Promise<string | undefined> {
-  try {
-    const res = await fetch(`https://photon.komoot.io/reverse/?lon=${lng}&lat=${lat}`);
-    const data: { features?: { properties?: Record<string, unknown> }[] } = await res.json();
-    const p = data.features?.[0]?.properties ?? {};
-    const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
-    const parts = [
-      [str(p.housenumber), str(p.street)].filter(Boolean).join(' ') || null,
-      str(p.city) ?? str(p.county),
-      str(p.state),
-      str(p.country),
-    ].filter((x): x is string => x != null);
-    return parts.join(', ') || str(p.name) || undefined;
-  } catch {
-    return undefined;
   }
 }
 

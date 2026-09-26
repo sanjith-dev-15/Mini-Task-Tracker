@@ -1,5 +1,4 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -8,6 +7,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { goBack } from '@/lib/navigation';
 import { useThemeContext, type ThemeMode } from '@/lib/theme';
 
 const OPTIONS: {
@@ -32,7 +32,7 @@ export default function AppearanceScreen() {
         <GlassIconButton
           name="chevron-back"
           color={theme.text}
-          onPress={() => router.back()}
+          onPress={() => goBack('/settings')}
           accessibilityLabel="Back to Settings"
         />
         <ThemedText type="subtitle">Appearance</ThemedText>

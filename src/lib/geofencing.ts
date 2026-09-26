@@ -25,6 +25,8 @@ const ENABLED_KEY = 'geofence:enabled';
 const SIGNATURE_KEY = 'geofence:signature';
 /** Must match STORAGE_KEY in `src/lib/reminders.tsx`. */
 const REMINDERS_KEY = 'reminders:v1';
+/** Reminder ids whose geofence fired but the in-app arrival modal hasn't shown yet. */
+const ARRIVALS_KEY = 'geofence:arrivals';
 
 /** Radius options offered in the reminder editor (metres). */
 export const RADIUS_OPTIONS = [200, 500, 1000] as const;
@@ -37,12 +39,17 @@ export function radiusLabel(m: number): string {
 /* ----------------------------------------------------------- background task */
 
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
+  // While the app is open, a location reminder shows as the in-app arrival
+  // modal instead of a banner — the sound still plays.
+  handleNotification: async (n) => {
+    const inApp = n.request.content.data?.reminderId != null;
+    return {
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+      shouldShowBanner: !inApp,
+      shouldShowList: !inApp,
+    };
+  },
 });
 
 TaskManager.defineTask(GEOFENCE_TASK, async ({ data, error }) => {
@@ -59,15 +66,22 @@ TaskManager.defineTask(GEOFENCE_TASK, async ({ data, error }) => {
     const match = reminders.find((r) => r.id === region.identifier && !r.done);
     if (!match) return;
 
+    await addArrival(match.id);
+    await ensureChannel();
+
+    const near = match.location?.label
+      ? `You're near ${match.location.label}`
+      : "You're near somewhere you set a reminder";
+    const notes = match.notes.trim();
     await Notifications.scheduleNotificationAsync({
       content: {
         title: match.title.trim() || 'Reminder nearby',
-        body: match.location?.label
-          ? `You're near ${match.location.label}`
-          : "You're near somewhere you set a reminder",
+        body: notes ? `${near}\n${notes}` : near,
         data: { reminderId: match.id },
+        sound: 'default',
+        priority: Notifications.AndroidNotificationPriority.MAX,
       },
-      trigger: null,
+      trigger: Platform.OS === 'android' ? { channelId: CHANNEL_ID } : null,
     });
   } catch {
     // A background task must never throw.
@@ -81,8 +95,34 @@ async function ensureChannel() {
   await Notifications.setNotificationChannelAsync(CHANNEL_ID, {
     name: 'Reminders',
     importance: Notifications.AndroidImportance.HIGH,
+    sound: 'default',
     vibrationPattern: [0, 250, 250, 250],
   });
+}
+
+/* ------------------------------------------------------------ arrivals queue */
+
+async function readArrivals(): Promise<string[]> {
+  try {
+    const raw = await AsyncStorage.getItem(ARRIVALS_KEY);
+    const ids = raw ? JSON.parse(raw) : [];
+    return Array.isArray(ids) ? ids : [];
+  } catch {
+    return [];
+  }
+}
+
+async function addArrival(id: string) {
+  const ids = await readArrivals();
+  if (!ids.includes(id)) await AsyncStorage.setItem(ARRIVALS_KEY, JSON.stringify([...ids, id]));
+}
+
+/** Reminder ids that fired while the modal couldn't show (e.g. app closed). */
+export const pendingArrivals = readArrivals;
+
+export async function clearArrival(id: string) {
+  const ids = await readArrivals();
+  await AsyncStorage.setItem(ARRIVALS_KEY, JSON.stringify(ids.filter((x) => x !== id)));
 }
 
 export type GeofenceState =

@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
-import { router, useFocusEffect } from 'expo-router';
+import { useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
@@ -28,6 +28,7 @@ import {
   setGeofencingEnabled,
   type GeofenceState,
 } from '@/lib/geofencing';
+import { goBack } from '@/lib/navigation';
 import { grantLabel, PERMISSIONS, type PermissionInfo } from '@/lib/permissions';
 import { useReminders } from '@/lib/reminders';
 
@@ -44,7 +45,7 @@ export default function PermissionsScreen() {
         <GlassIconButton
           name="chevron-back"
           color={theme.text}
-          onPress={() => router.back()}
+          onPress={() => goBack('/settings')}
           accessibilityLabel="Back to Settings"
         />
         <ThemedText type="subtitle">Permissions</ThemedText>
