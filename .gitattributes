@@ -1,0 +1,8 @@
+# Store and check out text files with LF endings on every OS (stops Git's
+# "LF will be replaced by CRLF" warnings on Windows). Binary files are detected
+# automatically and left untouched.
+* text=auto eol=lf
+
+# Windows-only scripts need CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf

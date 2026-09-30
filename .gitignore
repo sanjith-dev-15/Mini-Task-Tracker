@@ -48,6 +48,10 @@ example
 /ios
 /android
 
+# Gradle output of local Expo modules
+/modules/*/android/build/
+/modules/*/android/.gradle/
+
 # apk build artifacts
 *.apk
 *.aab

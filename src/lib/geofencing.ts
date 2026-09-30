@@ -5,7 +5,11 @@ import * as TaskManager from 'expo-task-manager';
 import { Platform } from 'react-native';
 
 import type { Reminder } from '@/lib/reminders';
-import { showOverlay } from '../../modules/reminder-overlay';
+import {
+  overlaySupported,
+  showOverlay,
+  type OverlayContent,
+} from '../../modules/reminder-overlay';
 
 /**
  * Location reminders (geofencing).
@@ -45,15 +49,18 @@ export function radiusLabel(m: number): string {
 /* ----------------------------------------------------------- background task */
 
 Notifications.setNotificationHandler({
-  // While the app is open, a location reminder shows as the in-app arrival
-  // modal instead of a banner — the sound still plays.
+  // While the app is open, skip the banner for a location reminder whose card
+  // is already on screen — the overlay, or (iOS / old build) the in-app
+  // modal. The sound still plays.
   handleNotification: async (n) => {
-    const inApp = n.request.content.data?.reminderId != null;
+    const data = n.request.content.data;
+    const cardShown =
+      data?.reminderId != null && (data.overlay === true || !overlaySupported);
     return {
       shouldPlaySound: true,
       shouldSetBadge: false,
-      shouldShowBanner: !inApp,
-      shouldShowList: !inApp,
+      shouldShowBanner: !cardShown,
+      shouldShowList: !cardShown,
     };
   },
 });
@@ -72,22 +79,12 @@ TaskManager.defineTask(GEOFENCE_TASK, async ({ data, error }) => {
     const match = reminders.find((r) => r.id === region.identifier && !r.done);
     if (!match) return;
 
-    const title = match.title.trim() || 'Reminder nearby';
-    const near = match.location?.label
-      ? `You're near ${match.location.label}`
-      : "You're near somewhere you set a reminder";
-    const notes = match.notes.trim();
+    const content = arrivalOverlayContent(match, await overlayDarkMode());
+    const { title, subtitle: near, notes } = content;
 
     // Android: pop the card over whatever is on screen (app open or not).
     // Otherwise queue it for the in-app modal on the next open.
-    const overlay = showOverlay({
-      id: match.id,
-      title,
-      subtitle: near,
-      notes,
-      url: `${DEEP_LINK_SCHEME}://reminder/${encodeURIComponent(match.id)}`,
-      dark: await overlayDarkMode(),
-    });
+    const overlay = showOverlay(content);
     if (!overlay) await addArrival(match.id);
     await ensureChannel();
 
@@ -108,6 +105,20 @@ TaskManager.defineTask(GEOFENCE_TASK, async ({ data, error }) => {
 
 /* ---------------------------------------------------------------- setup */
 
+/** What the over-other-apps arrival card shows for a reminder. */
+export function arrivalOverlayContent(r: Reminder, dark?: boolean): OverlayContent {
+  return {
+    id: r.id,
+    title: r.title.trim() || 'Reminder nearby',
+    subtitle: r.location?.label
+      ? `You're near ${r.location.label}`
+      : "You're near somewhere you set a reminder",
+    notes: r.notes.trim(),
+    url: `${DEEP_LINK_SCHEME}://reminder/${encodeURIComponent(r.id)}`,
+    dark,
+  };
+}
+
 /** The overlay follows the in-app theme choice (`theme:mode` in `src/lib/theme.tsx`). */
 async function overlayDarkMode(): Promise<boolean | undefined> {
   const mode = await AsyncStorage.getItem(THEME_KEY).catch(() => null);
@@ -119,7 +130,8 @@ async function ensureChannel() {
   await Notifications.setNotificationChannelAsync(CHANNEL_ID, {
     name: 'Reminders',
     importance: Notifications.AndroidImportance.HIGH,
-    sound: 'default',
+    // Omit `sound` for the system default — a channel's `sound` is a custom
+    // file name, so 'default' would be looked up as a missing file.
     vibrationPattern: [0, 250, 250, 250],
   });
 }

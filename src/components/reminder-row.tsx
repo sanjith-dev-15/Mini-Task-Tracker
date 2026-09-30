@@ -12,10 +12,10 @@ import type { Reminder, ReminderViewMode } from '@/lib/reminders';
  * - `compact`: title only, tighter row.
  * - `detail` (default): title + due date / place.
  * - `notes`: detail plus a preview of the saved notes.
- * - `grid`: a card for a two-column grid (see {@link ReminderTile}).
+ * - `grid` / `grid3`: a card for a two- / three-column grid (see {@link ReminderTile}).
  */
 export function ReminderRow(props: RowProps) {
-  if (props.variant === 'grid') return <ReminderTile {...props} />;
+  if (props.variant === 'grid' || props.variant === 'grid3') return <ReminderTile {...props} />;
   return <ListRow {...props} />;
 }
 
@@ -53,17 +53,20 @@ function locationText(location: NonNullable<Reminder['location']>): string {
 }
 
 /** Grid card: checkbox + delete on top, then title, due, place and a notes preview. */
-function ReminderTile({ reminder, onPress, onDelete, onToggle }: RowProps) {
+function ReminderTile({ reminder, variant, onPress, onDelete, onToggle }: RowProps) {
   const theme = useTheme();
   const { done, dueAt, location, title } = reminder;
   const overdue = isOverdue(dueAt, done);
   const notes = reminder.notes.trim();
+  // Three-across tiles are narrow: tighter padding, smaller text, shorter preview.
+  const small = variant === 'grid3';
 
   return (
     <Pressable
       onPress={onPress}
       style={({ pressed }) => [
         styles.tile,
+        small && styles.tileSmall,
         { backgroundColor: theme.card, borderColor: theme.border, opacity: pressed ? 0.7 : 1 },
       ]}>
       <View style={styles.tileTop}>
@@ -74,15 +77,15 @@ function ReminderTile({ reminder, onPress, onDelete, onToggle }: RowProps) {
           accessibilityRole="button"
           accessibilityLabel="Delete reminder"
           style={({ pressed }) => [styles.actionBtn, pressed && { opacity: 0.5 }]}>
-          <Ionicons name="trash-outline" size={16} color={theme.danger} />
+          <Ionicons name="trash-outline" size={small ? 14 : 16} color={theme.danger} />
         </Pressable>
       </View>
 
       <ThemedText
         type="smallBold"
-        numberOfLines={2}
+        numberOfLines={small ? 3 : 2}
         themeColor={done ? 'textSecondary' : 'text'}
-        style={[styles.tileTitle, done && styles.strike]}>
+        style={[styles.tileTitle, small && styles.tileTitleSmall, done && styles.strike]}>
         {title.trim() || 'Untitled reminder'}
       </ThemedText>
 
@@ -90,20 +93,31 @@ function ReminderTile({ reminder, onPress, onDelete, onToggle }: RowProps) {
         <ThemedText
           type="small"
           numberOfLines={1}
-          style={{ color: overdue ? theme.danger : theme.textSecondary }}>
+          style={[
+            { color: overdue ? theme.danger : theme.textSecondary },
+            small && styles.smallText,
+          ]}>
           {formatDue(dueAt)}
         </ThemedText>
       )}
       {location != null && (
         <View style={[styles.locChip, styles.tileLoc]}>
-          <Ionicons name="location-outline" size={12} color={theme.textSecondary} />
-          <ThemedText type="small" themeColor="textSecondary" numberOfLines={1} style={styles.flex}>
+          <Ionicons name="location-outline" size={small ? 11 : 12} color={theme.textSecondary} />
+          <ThemedText
+            type="small"
+            themeColor="textSecondary"
+            numberOfLines={1}
+            style={[styles.flex, small && styles.smallText]}>
             {locationText(location)}
           </ThemedText>
         </View>
       )}
       {notes ? (
-        <ThemedText type="small" themeColor="textSecondary" numberOfLines={4} style={styles.notes}>
+        <ThemedText
+          type="small"
+          themeColor="textSecondary"
+          numberOfLines={small ? 2 : 4}
+          style={[styles.notes, small && styles.smallText]}>
           {notes}
         </ThemedText>
       ) : null}
@@ -217,7 +231,10 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: Spacing.one,
   },
+  tileSmall: { minHeight: 112, padding: Spacing.two + 2, borderRadius: 14 },
   tileTitle: { fontSize: 15 },
+  tileTitleSmall: { fontSize: 13, lineHeight: 17 },
+  smallText: { fontSize: 12, lineHeight: 16 },
   tileLoc: { maxWidth: '100%' },
   flex: { flex: 1 },
   checkbox: {

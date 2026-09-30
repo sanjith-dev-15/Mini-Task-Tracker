@@ -28,6 +28,7 @@ const VIEW_OPTIONS: {
   icon: keyof typeof Ionicons.glyphMap;
 }[] = [
   { mode: 'grid', label: 'Grid', icon: 'grid-outline' },
+  { mode: 'grid3', label: 'Grid · 3 columns', icon: 'apps-outline' },
   { mode: 'compact', label: 'Compact', icon: 'list-outline' },
   { mode: 'detail', label: 'Detail', icon: 'reorder-four-outline' },
   { mode: 'notes', label: 'With notes', icon: 'document-text-outline' },
@@ -89,20 +90,23 @@ export default function HomeScreen() {
 
   const pending = reminders.filter((r) => !r.done).length;
 
-  const grid = viewMode === 'grid';
-  // Pad an odd grid with an empty cell so the last card keeps half width.
-  const rows: (Reminder | null)[] =
-    grid && reminders.length % 2 === 1 ? [...reminders, null] : reminders;
+  const columns = viewMode === 'grid3' ? 3 : viewMode === 'grid' ? 2 : 1;
+  const grid = columns > 1;
+  // Pad the last grid row with empty cells so its cards keep their width.
+  const fillers = grid ? (columns - (reminders.length % columns)) % columns : 0;
+  const rows: (Reminder | null)[] = fillers
+    ? [...reminders, ...Array<null>(fillers).fill(null)]
+    : reminders;
 
   const list = (
     <FlatList
       // Switching column count needs a fresh list instance.
-      key={grid ? 'grid' : 'list'}
-      numColumns={grid ? 2 : 1}
+      key={`cols-${columns}`}
+      numColumns={columns}
       columnWrapperStyle={grid ? styles.gridRow : undefined}
       style={styles.flex}
       data={rows}
-      keyExtractor={(r) => r?.id ?? 'filler'}
+      keyExtractor={(r, i) => r?.id ?? `filler-${i}`}
       contentContainerStyle={[
         styles.listContent,
         { paddingBottom: insets.bottom + Spacing.six + Spacing.six },
