@@ -1,4 +1,15 @@
 import type { Ionicons } from '@expo/vector-icons';
+import * as Location from 'expo-location';
+import * as Notifications from 'expo-notifications';
+import { Platform } from 'react-native';
+
+import {
+  canDrawOverlays,
+  isIgnoringBatteryOptimizations,
+  openOverlaySettings,
+  overlaySupported,
+  requestIgnoreBatteryOptimizations,
+} from '../../modules/reminder-overlay';
 
 /** How the OS grants a permission. */
 export type GrantKind = 'runtime' | 'install' | 'dev';
@@ -88,13 +99,121 @@ export const PERMISSIONS: PermissionInfo[] = [
   {
     key: 'overlay',
     title: 'Display over other apps',
-    icon: 'bug-outline',
+    icon: 'albums-outline',
     android: ['SYSTEM_ALERT_WINDOW'],
-    purpose: 'Shows the red error overlay while developing.',
-    detail: 'Present only in development builds — a release build does not request it.',
-    grant: 'dev',
+    purpose: 'Pop the reminder card up on screen when you arrive, even while you’re in another app.',
+    detail:
+      'Only used for the arrival card of a location reminder. Without it you just get the notification, and the card shows the next time you open the app.',
+    grant: 'runtime',
+  },
+  {
+    key: 'battery',
+    title: 'Unrestricted battery',
+    icon: 'battery-charging-outline',
+    android: ['REQUEST_IGNORE_BATTERY_OPTIMIZATIONS'],
+    purpose: 'Keep location reminders firing while the app is closed.',
+    detail:
+      'Battery optimisation can stop the app from hearing that you arrived. Geofencing is low-power, so this costs very little battery.',
+    grant: 'runtime',
   },
 ];
+
+/* ------------------------------------------------ runtime permission status */
+
+export type PermStatus = 'granted' | 'denied' | 'undetermined' | 'unavailable';
+export type PermResult = { status: PermStatus; canAsk: boolean };
+
+/** Keys in `PERMISSIONS` that map to a runtime permission we can drive. */
+export const RUNTIME_KEYS = [
+  'location',
+  'background-location',
+  'notifications',
+  'overlay',
+  'battery',
+] as const;
+export type RuntimeKey = (typeof RUNTIME_KEYS)[number];
+
+/** Android-only special permissions granted from a system settings screen. */
+const SETTINGS_SCREEN_KEYS: readonly string[] = ['overlay', 'battery'];
+
+/** Granted on a system settings screen rather than via an in-app dialog. */
+export function isSettingsScreenPermission(key: string): boolean {
+  return SETTINGS_SCREEN_KEYS.includes(key);
+}
+
+function toResult(granted: boolean, canAskAgain: boolean | undefined): PermResult {
+  const canAsk = canAskAgain ?? true;
+  return { status: granted ? 'granted' : canAsk ? 'undetermined' : 'denied', canAsk };
+}
+
+export async function readPermission(key: string): Promise<PermResult> {
+  try {
+    if (key === 'location') {
+      const r = await Location.getForegroundPermissionsAsync();
+      return toResult(r.granted, r.canAskAgain);
+    }
+    if (key === 'background-location') {
+      const r = await Location.getBackgroundPermissionsAsync();
+      return toResult(r.granted, r.canAskAgain);
+    }
+    if (key === 'notifications') {
+      const r = await Notifications.getPermissionsAsync();
+      return toResult(r.granted, r.canAskAgain);
+    }
+    if (isSettingsScreenPermission(key)) {
+      if (!overlaySupported) return { status: 'unavailable', canAsk: false };
+      const granted = key === 'overlay' ? canDrawOverlays() : isIgnoringBatteryOptimizations();
+      return toResult(granted, true);
+    }
+  } catch {
+    /* native module or manifest entry missing */
+  }
+  return { status: 'unavailable', canAsk: false };
+}
+
+/**
+ * Ask for a permission. For the settings-screen ones this only opens the
+ * system page — re-read the status when the app comes back to the foreground.
+ */
+export async function askPermission(key: string): Promise<PermResult> {
+  try {
+    if (key === 'location') {
+      const r = await Location.requestForegroundPermissionsAsync();
+      return toResult(r.granted, r.canAskAgain);
+    }
+    if (key === 'background-location') {
+      const fg = await Location.getForegroundPermissionsAsync();
+      if (!fg.granted) {
+        const asked = await Location.requestForegroundPermissionsAsync();
+        if (!asked.granted) return toResult(false, asked.canAskAgain);
+      }
+      const r = await Location.requestBackgroundPermissionsAsync();
+      return toResult(r.granted, r.canAskAgain);
+    }
+    if (key === 'notifications') {
+      const r = await Notifications.requestPermissionsAsync();
+      return toResult(r.granted, r.canAskAgain);
+    }
+    if (key === 'overlay') {
+      openOverlaySettings();
+      return readPermission(key);
+    }
+    if (key === 'battery') {
+      requestIgnoreBatteryOptimizations();
+      return readPermission(key);
+    }
+  } catch {
+    /* native module or manifest entry missing */
+  }
+  return { status: 'unavailable', canAsk: false };
+}
+
+/** Runtime permissions that apply on this platform / build. */
+export function applicableRuntimeKeys(): RuntimeKey[] {
+  return RUNTIME_KEYS.filter(
+    (k) => Platform.OS === 'android' || !isSettingsScreenPermission(k),
+  );
+}
 
 export function grantLabel(info: PermissionInfo): string {
   if (info.grant === 'dev') return 'Dev builds only';

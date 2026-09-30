@@ -5,14 +5,16 @@ import * as TaskManager from 'expo-task-manager';
 import { Platform } from 'react-native';
 
 import type { Reminder } from '@/lib/reminders';
+import { showOverlay } from '../../modules/reminder-overlay';
 
 /**
  * Location reminders (geofencing).
  *
  * We register one geofence per located, not-done reminder. When the device
  * enters one — even with the app closed — the background task below reads the
- * reminders straight from AsyncStorage (it can't touch React state) and posts a
- * local notification.
+ * reminders straight from AsyncStorage (it can't touch React state), shows the
+ * arrival card over other apps (Android, "Display over other apps" granted) and
+ * posts a local notification.
  *
  * This module is imported at the top of the root layout so `defineTask` and
  * `setNotificationHandler` run during module load, as expo-task-manager requires.
@@ -27,6 +29,10 @@ const SIGNATURE_KEY = 'geofence:signature';
 const REMINDERS_KEY = 'reminders:v1';
 /** Reminder ids whose geofence fired but the in-app arrival modal hasn't shown yet. */
 const ARRIVALS_KEY = 'geofence:arrivals';
+/** Must match STORAGE_KEY in `src/lib/theme.tsx`. */
+const THEME_KEY = 'theme:mode';
+/** Must match `expo.scheme` in app.json. */
+const DEEP_LINK_SCHEME = 'app';
 
 /** Radius options offered in the reminder editor (metres). */
 export const RADIUS_OPTIONS = [200, 500, 1000] as const;
@@ -66,18 +72,30 @@ TaskManager.defineTask(GEOFENCE_TASK, async ({ data, error }) => {
     const match = reminders.find((r) => r.id === region.identifier && !r.done);
     if (!match) return;
 
-    await addArrival(match.id);
-    await ensureChannel();
-
+    const title = match.title.trim() || 'Reminder nearby';
     const near = match.location?.label
       ? `You're near ${match.location.label}`
       : "You're near somewhere you set a reminder";
     const notes = match.notes.trim();
+
+    // Android: pop the card over whatever is on screen (app open or not).
+    // Otherwise queue it for the in-app modal on the next open.
+    const overlay = showOverlay({
+      id: match.id,
+      title,
+      subtitle: near,
+      notes,
+      url: `${DEEP_LINK_SCHEME}://reminder/${encodeURIComponent(match.id)}`,
+      dark: await overlayDarkMode(),
+    });
+    if (!overlay) await addArrival(match.id);
+    await ensureChannel();
+
     await Notifications.scheduleNotificationAsync({
       content: {
-        title: match.title.trim() || 'Reminder nearby',
+        title,
         body: notes ? `${near}\n${notes}` : near,
-        data: { reminderId: match.id },
+        data: { reminderId: match.id, overlay },
         sound: 'default',
         priority: Notifications.AndroidNotificationPriority.MAX,
       },
@@ -89,6 +107,12 @@ TaskManager.defineTask(GEOFENCE_TASK, async ({ data, error }) => {
 });
 
 /* ---------------------------------------------------------------- setup */
+
+/** The overlay follows the in-app theme choice (`theme:mode` in `src/lib/theme.tsx`). */
+async function overlayDarkMode(): Promise<boolean | undefined> {
+  const mode = await AsyncStorage.getItem(THEME_KEY).catch(() => null);
+  return mode === 'dark' ? true : mode === 'light' ? false : undefined;
+}
 
 async function ensureChannel() {
   if (Platform.OS !== 'android') return;
@@ -173,6 +197,17 @@ export async function isGeofencingEnabled(): Promise<boolean> {
 export async function setGeofencingEnabled(on: boolean, reminders: Reminder[]): Promise<void> {
   await AsyncStorage.setItem(ENABLED_KEY, on ? '1' : '0');
   await syncGeofences(reminders);
+}
+
+/**
+ * Turn location reminders on once every permission they need is granted —
+ * unless the user has already switched them on/off themselves in Settings.
+ */
+export async function enableGeofencingByDefault(reminders: Reminder[]): Promise<void> {
+  if ((await AsyncStorage.getItem(ENABLED_KEY)) != null) return;
+  if ((await geofencePermissionState()) !== 'ready') return;
+  await ensureChannel();
+  await setGeofencingEnabled(true, reminders);
 }
 
 /* --------------------------------------------------------------- sync */
