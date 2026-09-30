@@ -17,9 +17,9 @@ const VIEW_KEY = 'reminders:view';
 const SORT_KEY = 'reminders:sort';
 
 /** How the Home reminders list is laid out. */
-export type ReminderViewMode = 'grid' | 'compact' | 'detail' | 'notes';
+export type ReminderViewMode = 'grid' | 'grid3' | 'compact' | 'detail' | 'notes';
 
-const VIEW_MODES: ReminderViewMode[] = ['grid', 'compact', 'detail', 'notes'];
+const VIEW_MODES: ReminderViewMode[] = ['grid', 'grid3', 'compact', 'detail', 'notes'];
 
 /** Order the Home reminders list is sorted in (done ones always sink to the bottom). */
 export type ReminderSortMode = 'due' | 'updated' | 'created' | 'title';

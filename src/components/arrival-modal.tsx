@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Notifications from 'expo-notifications';
 import { router } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 
@@ -9,17 +9,45 @@ import { GlassSurface } from '@/components/glass-surface';
 import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { clearArrival, pendingArrivals } from '@/lib/geofencing';
+import { arrivalOverlayContent, clearArrival, pendingArrivals } from '@/lib/geofencing';
 import { useReminders } from '@/lib/reminders';
+import { useThemeContext } from '@/lib/theme';
+import {
+  addOverlayDoneListener,
+  canDrawOverlays,
+  hideOverlay,
+  overlaySupported,
+  showOverlay,
+  takeOverlayDone,
+} from '../../modules/reminder-overlay';
 
 function reminderIdOf(n: Notifications.Notification): string | undefined {
   const id = n.request.content.data?.reminderId;
   return typeof id === 'string' ? id : undefined;
 }
 
+/** The arrival was already shown as the over-other-apps card. */
+function shownAsOverlay(n: Notifications.Notification): boolean {
+  return n.request.content.data?.overlay === true;
+}
+
+/** Remove a reminder's alert from the notification shade. */
+function dismissNotificationsFor(id: string) {
+  Notifications.getPresentedNotificationsAsync()
+    .then((list) =>
+      list
+        .filter((n) => reminderIdOf(n) === id)
+        .forEach((n) => Notifications.dismissNotificationAsync(n.request.identifier)),
+    )
+    .catch(() => {});
+}
+
 /**
- * "You've arrived" pop-up for location reminders. Shows the reminder's title,
- * place and saved notes when its geofence fires:
+ * "You've arrived" pop-up for location reminders. On Android with "Display
+ * over other apps" granted, the geofence task draws the card over any app
+ * (modules/reminder-overlay) and this in-app modal stays out of the way —
+ * it only applies the overlay's "Mark done" taps. Otherwise it shows the
+ * reminder's title, place and saved notes:
  * - live, if the app is open (the notification handler skips the banner and
  *   just plays the sound — see geofencing.ts);
  * - on the next open / return to the app, if it fired in the background;
@@ -28,6 +56,7 @@ function reminderIdOf(n: Notifications.Notification): string | undefined {
  */
 export function ArrivalModal() {
   const theme = useTheme();
+  const { scheme } = useThemeContext();
   const { getReminder, updateReminder, loading } = useReminders();
   const [queue, setQueue] = useState<string[]>([]);
 
@@ -44,11 +73,18 @@ export function ArrivalModal() {
     });
     const received = Notifications.addNotificationReceivedListener((n) => {
       const id = reminderIdOf(n);
-      if (id) enqueue([id]);
+      if (id && !shownAsOverlay(n)) enqueue([id]);
     });
     const tapped = Notifications.addNotificationResponseReceivedListener((r) => {
       const id = reminderIdOf(r.notification);
-      if (id) enqueue([id]);
+      if (!id) return;
+      if (shownAsOverlay(r.notification)) {
+        // The card is (or was) already on screen — go straight to the reminder.
+        hideOverlay(id);
+        router.push({ pathname: '/reminder/[id]', params: { id } });
+      } else {
+        enqueue([id]);
+      }
     });
     return () => {
       appState.remove();
@@ -56,6 +92,28 @@ export function ArrivalModal() {
       tapped.remove();
     };
   }, [enqueue]);
+
+  // Apply "Mark done" taps from the overlay — live if the app is running,
+  // otherwise on the next launch / return to the app.
+  useEffect(() => {
+    if (loading) return;
+    const applyDone = () => {
+      for (const id of takeOverlayDone()) {
+        const r = getReminder(id);
+        if (r && !r.done) updateReminder(id, { done: true });
+        dismissNotificationsFor(id);
+      }
+    };
+    applyDone();
+    const done = addOverlayDoneListener(applyDone);
+    const appState = AppState.addEventListener('change', (s) => {
+      if (s === 'active') applyDone();
+    });
+    return () => {
+      done.remove();
+      appState.remove();
+    };
+  }, [loading, getReminder, updateReminder]);
 
   // Skip anything deleted or already done since it fired.
   const isLive = useCallback(
@@ -65,7 +123,24 @@ export function ArrivalModal() {
     },
     [getReminder],
   );
-  const live = loading ? [] : queue.filter(isLive);
+  // Android build with the overlay module: the card only ever shows over
+  // other apps, never inside this one. Arrivals wait in the queue until
+  // "Display over other apps" is granted (the PermissionGate asks for it),
+  // then go to the overlay. The in-app modal is the iOS / old-build fallback.
+  const overlayOn = canDrawOverlays();
+  const live = loading || overlaySupported ? [] : queue.filter(isLive);
+  const forwarded = useRef(new Set<string>());
+
+  useEffect(() => {
+    if (loading || !overlayOn) return;
+    for (const id of queue) {
+      const r = getReminder(id);
+      if (!r || r.done || forwarded.current.has(id)) continue;
+      forwarded.current.add(id);
+      showOverlay(arrivalOverlayContent(r, scheme === 'dark'));
+      clearArrival(id).catch(() => {});
+    }
+  }, [queue, loading, overlayOn, getReminder, scheme]);
 
   // Drop the stale ones from storage so they don't come back next launch.
   useEffect(() => {
@@ -80,13 +155,7 @@ export function ArrivalModal() {
     if (!currentId) return;
     clearArrival(currentId).catch(() => {});
     // Also clear its entry from the notification shade.
-    Notifications.getPresentedNotificationsAsync()
-      .then((list) =>
-        list
-          .filter((n) => reminderIdOf(n) === currentId)
-          .forEach((n) => Notifications.dismissNotificationAsync(n.request.identifier)),
-      )
-      .catch(() => {});
+    dismissNotificationsFor(currentId);
     setQueue((q) => q.filter((id) => id !== currentId));
   };
 

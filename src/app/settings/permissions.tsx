@@ -1,10 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
-import * as Location from 'expo-location';
-import * as Notifications from 'expo-notifications';
 import { useFocusEffect } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  AppState,
   Linking,
   Pressable,
   ScrollView,
@@ -29,7 +28,16 @@ import {
   type GeofenceState,
 } from '@/lib/geofencing';
 import { goBack } from '@/lib/navigation';
-import { grantLabel, PERMISSIONS, type PermissionInfo } from '@/lib/permissions';
+import {
+  applicableRuntimeKeys,
+  askPermission,
+  grantLabel,
+  isSettingsScreenPermission,
+  PERMISSIONS,
+  readPermission,
+  type PermissionInfo,
+  type PermStatus,
+} from '@/lib/permissions';
 import { useReminders } from '@/lib/reminders';
 
 export default function PermissionsScreen() {
@@ -76,62 +84,6 @@ export default function PermissionsScreen() {
 
 /* ----------------------------------------------- raw OS permission plumbing */
 
-type PermStatus = 'granted' | 'denied' | 'undetermined' | 'unavailable';
-type PermResult = { status: PermStatus; canAsk: boolean };
-
-/** Keys in `PERMISSIONS` that map to a runtime permission we can drive. */
-const RUNTIME_KEYS = ['location', 'background-location', 'notifications'] as const;
-
-function toResult(granted: boolean, canAskAgain: boolean | undefined): PermResult {
-  const canAsk = canAskAgain ?? true;
-  return { status: granted ? 'granted' : canAsk ? 'undetermined' : 'denied', canAsk };
-}
-
-async function readStatus(key: string): Promise<PermResult> {
-  try {
-    if (key === 'location') {
-      const r = await Location.getForegroundPermissionsAsync();
-      return toResult(r.granted, r.canAskAgain);
-    }
-    if (key === 'background-location') {
-      const r = await Location.getBackgroundPermissionsAsync();
-      return toResult(r.granted, r.canAskAgain);
-    }
-    if (key === 'notifications') {
-      const r = await Notifications.getPermissionsAsync();
-      return toResult(r.granted, r.canAskAgain);
-    }
-  } catch {
-    /* native module or manifest entry missing */
-  }
-  return { status: 'unavailable', canAsk: false };
-}
-
-async function askPermission(key: string): Promise<PermResult> {
-  try {
-    if (key === 'location') {
-      const r = await Location.requestForegroundPermissionsAsync();
-      return toResult(r.granted, r.canAskAgain);
-    }
-    if (key === 'background-location') {
-      const fg = await Location.getForegroundPermissionsAsync();
-      if (!fg.granted) {
-        const asked = await Location.requestForegroundPermissionsAsync();
-        if (!asked.granted) return toResult(false, asked.canAskAgain);
-      }
-      const r = await Location.requestBackgroundPermissionsAsync();
-      return toResult(r.granted, r.canAskAgain);
-    }
-    if (key === 'notifications') {
-      const r = await Notifications.requestPermissionsAsync();
-      return toResult(r.granted, r.canAskAgain);
-    }
-  } catch {
-    /* native module or manifest entry missing */
-  }
-  return { status: 'unavailable', canAsk: false };
-}
-
 const STATUS_TEXT: Record<PermStatus, string> = {
   granted: 'Allowed',
   denied: 'Denied — turn on in system settings',
@@ -148,7 +100,7 @@ function usePermission(key: string, active: boolean) {
 
   const refresh = useCallback(() => {
     if (!active) return;
-    readStatus(key)
+    readPermission(key)
       .then((r) => {
         setStatus(r.status);
         setCanAsk(r.canAsk);
@@ -157,6 +109,14 @@ function usePermission(key: string, active: boolean) {
   }, [key, active]);
 
   useFocusEffect(useCallback(() => refresh(), [refresh]));
+
+  // Coming back from a system settings screen doesn't refocus the route.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (s) => {
+      if (s === 'active') refresh();
+    });
+    return () => sub.remove();
+  }, [refresh]);
 
   const promptSettings = (mode: 'grant' | 'revoke') =>
     showAlert({
@@ -187,7 +147,9 @@ function usePermission(key: string, active: boolean) {
         return;
       }
       if (!next) {
-        promptSettings('revoke');
+        // These live on their own system page — open it straight away.
+        if (isSettingsScreenPermission(key)) askPermission(key).catch(() => {});
+        else promptSettings('revoke');
         return;
       }
       if (!canAsk || status === 'denied') {
@@ -331,7 +293,7 @@ function PermissionCard({
   onExpand: () => void;
 }) {
   const theme = useTheme();
-  const runtime = (RUNTIME_KEYS as readonly string[]).includes(info.key);
+  const runtime = (applicableRuntimeKeys() as string[]).includes(info.key);
   const { status, busy, set, alert } = usePermission(info.key, runtime);
 
   return (

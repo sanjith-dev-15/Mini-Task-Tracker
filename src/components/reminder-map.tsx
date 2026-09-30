@@ -6,7 +6,7 @@ import {
   LogManager,
   Map,
   Marker,
-  UserLocation,
+  useCurrentPosition,
 } from '@maplibre/maplibre-react-native';
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -58,6 +58,21 @@ const STYLE_URL = {
 const DEFAULT_CENTER: [number, number] = [78.9629, 20.5937]; // India
 const DEFAULT_ZOOM = 3.5;
 const PIN_ZOOM = 13;
+/** Your live-location dot — green, so it never reads as a (blue) reminder pin. */
+const LIVE_COLOR = '#22C55E';
+const PIN_LABEL_HEIGHT = 22;
+
+/**
+ * Short tag shown above a pin: the title, else the first named part of the
+ * place — skipping house / door numbers like "43" or "7/6B".
+ */
+function pinLabel(r: Reminder): string {
+  const title = r.title.trim();
+  if (title) return title;
+  const parts = (r.location?.label ?? '').split(',').map((p) => p.trim());
+  const named = parts.find((p) => /[a-z]{3,}/i.test(p));
+  return named || 'Reminder';
+}
 
 export type { LatLng } from '@/lib/geocode';
 
@@ -133,6 +148,11 @@ export function ReminderMap({
 
   /** User's location `[lng, lat]` once known — used for result distances. */
   const [userLoc, setUserLoc] = useState<[number, number] | null>(null);
+  // Live position for the "you are here" dot (`[lng, lat]`).
+  const position = useCurrentPosition();
+  const me: [number, number] | null = position?.coords
+    ? [position.coords.longitude, position.coords.latitude]
+    : null;
 
   /** Last known map centre `[lng, lat]`, used to bias search results. */
   const centerRef = useRef<[number, number] | null>(null);
@@ -497,11 +517,10 @@ export function ReminderMap({
           handleLongPress(lat, lng);
         }}>
         <Camera ref={cameraRef} initialViewState={initialViewState} />
-        <UserLocation />
-
         {located.map((r) => {
           const loc = r.location!;
           const active = r.id === selectedId;
+          const label = pinLabel(r);
           return (
             <Marker
               key={r.id}
@@ -516,17 +535,36 @@ export function ReminderMap({
                   duration: 400,
                 });
               }}>
-              <View style={styles.pinHit}>
+              {/* Label above, same-height spacer below → the dot stays centred on the spot. */}
+              <View style={styles.pinStack}>
                 <View
                   style={[
-                    styles.pin,
-                    active && styles.pinActive,
+                    styles.pinLabel,
                     {
-                      backgroundColor: r.done ? colors.textSecondary : colors.accent,
-                      borderColor: active ? colors.accent : colors.card,
+                      backgroundColor: colors.card,
+                      borderColor: active ? colors.accent : colors.border,
                     },
-                  ]}
-                />
+                  ]}>
+                  <ThemedText
+                    type="small"
+                    numberOfLines={1}
+                    style={[styles.pinLabelText, { color: r.done ? colors.textSecondary : colors.text }]}>
+                    {label}
+                  </ThemedText>
+                </View>
+                <View style={styles.pinHit}>
+                  <View
+                    style={[
+                      styles.pin,
+                      active && styles.pinActive,
+                      {
+                        backgroundColor: r.done ? colors.textSecondary : colors.accent,
+                        borderColor: active ? colors.accent : colors.card,
+                      },
+                    ]}
+                  />
+                </View>
+                <View style={styles.pinSpacer} />
               </View>
             </Marker>
           );
@@ -553,6 +591,16 @@ export function ReminderMap({
           <Marker id="drop" lngLat={dropAt}>
             <View style={styles.pinHit}>
               <Ionicons name="location" size={34} color={colors.danger} />
+            </View>
+          </Marker>
+        )}
+
+        {/* Live location — its own colour, and last so it sits above any pin
+            you're standing on. */}
+        {me && (
+          <Marker id="me" lngLat={me}>
+            <View style={styles.meHalo} pointerEvents="none">
+              <View style={styles.meDot} />
             </View>
           </Marker>
         )}
@@ -705,6 +753,33 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   pinHit: { padding: 8, alignItems: 'center', justifyContent: 'center' },
+  pinStack: { alignItems: 'center' },
+  meHalo: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: LIVE_COLOR + '38',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  meDot: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    borderWidth: 3,
+    borderColor: '#fff',
+    backgroundColor: LIVE_COLOR,
+  },
+  pinLabel: {
+    height: PIN_LABEL_HEIGHT,
+    maxWidth: 140,
+    paddingHorizontal: 8,
+    borderRadius: PIN_LABEL_HEIGHT / 2,
+    borderWidth: StyleSheet.hairlineWidth,
+    justifyContent: 'center',
+  },
+  pinLabelText: { fontSize: 11, lineHeight: 14, fontWeight: '600' },
+  pinSpacer: { height: PIN_LABEL_HEIGHT },
   pin: {
     width: 18,
     height: 18,

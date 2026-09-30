@@ -16,6 +16,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AnimatedSplash } from '@/components/animated-splash';
 import { ArrivalModal } from '@/components/arrival-modal';
 import { GlassNav } from '@/components/glass-nav';
+import { PermissionGate } from '@/components/permission-gate';
 import { Spacing } from '@/constants/theme';
 import { AuthProvider } from '@/lib/auth';
 import { ExpensesProvider } from '@/lib/expenses';
@@ -52,6 +53,7 @@ export default function RootLayout() {
                 <ExpensesProvider>
                   <GeofenceSync />
                   <ThemedRoot />
+                  <PermissionGate ready={splashDone} />
                 </ExpensesProvider>
               </RemindersProvider>
             </NotesProvider>
