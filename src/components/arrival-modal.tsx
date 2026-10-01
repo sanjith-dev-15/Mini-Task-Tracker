@@ -178,9 +178,9 @@ export function ArrivalModal() {
       transparent
       animationType="fade"
       statusBarTranslucent
-      onRequestClose={close}>
+      // Stays up until Open, Mark done or Later — back / tapping outside do nothing.
+      onRequestClose={() => {}}>
       <View style={styles.scrim}>
-        <Pressable style={StyleSheet.absoluteFill} onPress={close} />
         {reminder && (
           <Animated.View
             key={reminder.id}

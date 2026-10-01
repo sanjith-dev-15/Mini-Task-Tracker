@@ -33,6 +33,10 @@ const SIGNATURE_KEY = 'geofence:signature';
 const REMINDERS_KEY = 'reminders:v1';
 /** Reminder ids whose geofence fired but the in-app arrival modal hasn't shown yet. */
 const ARRIVALS_KEY = 'geofence:arrivals';
+/** Background location updates (Android foreground service) — see below. */
+const WATCH_TASK = 'reminder-watch';
+/** Reminder ids the device is currently inside (already alerted for this visit). */
+const INSIDE_KEY = 'geofence:inside';
 /** Must match STORAGE_KEY in `src/lib/theme.tsx`. */
 const THEME_KEY = 'theme:mode';
 /** Must match `expo.scheme` in app.json. */
@@ -65,43 +69,127 @@ Notifications.setNotificationHandler({
   },
 });
 
+/*
+ * Two triggers feed the same alert:
+ * - OS geofences (cheap, but on Android they only fire when *something* asks
+ *   for a fresh location — with the app closed that can take ages, so the
+ *   alert used to turn up only once the app was opened and the map asked
+ *   for a fix);
+ * - a location-updates task running as a foreground service (Android shows
+ *   a small "Location reminders on" notification), which keeps fixes coming
+ *   while the app is closed and checks the distance to each reminder itself.
+ * `INSIDE_KEY` remembers which reminders we're already inside so each visit
+ * alerts once, whichever trigger gets there first.
+ */
+
 TaskManager.defineTask(GEOFENCE_TASK, async ({ data, error }) => {
   if (error) return;
   const { eventType, region } = data as {
     eventType: Location.GeofencingEventType;
     region: Location.LocationRegion;
   };
-  if (eventType !== Location.GeofencingEventType.Enter) return;
-
   try {
-    const raw = await AsyncStorage.getItem(REMINDERS_KEY);
-    const reminders: Reminder[] = raw ? JSON.parse(raw) : [];
-    const match = reminders.find((r) => r.id === region.identifier && !r.done);
-    if (!match) return;
+    const id = region.identifier;
+    if (!id) return;
+    if (eventType === Location.GeofencingEventType.Exit) {
+      await updateInside((ids) => ids.delete(id));
+      return;
+    }
+    const reminders = await storedReminders();
+    const match = reminders.find((r) => r.id === id && !r.done);
+    if (match) await arrive([match]);
+  } catch {
+    // A background task must never throw.
+  }
+});
 
-    const content = arrivalOverlayContent(match, await overlayDarkMode());
+TaskManager.defineTask(WATCH_TASK, async ({ data, error }) => {
+  if (error) return;
+  const { locations } = (data ?? {}) as { locations?: Location.LocationObject[] };
+  const fix = locations?.[locations.length - 1]?.coords;
+  if (!fix) return;
+  try {
+    const reminders = (await storedReminders()).filter((r) => r.location && !r.done);
+    const entered: Reminder[] = [];
+    const left: string[] = [];
+    for (const r of reminders) {
+      const radius = r.location!.radius ?? DEFAULT_RADIUS;
+      const d = distanceMeters(fix.latitude, fix.longitude, r.location!.lat, r.location!.lng);
+      if (d <= radius) entered.push(r);
+      // A little slack (and the fix's own error) so GPS jitter at the edge
+      // doesn't count as leaving and arriving again.
+      else if (d > radius * 1.2 + (fix.accuracy ?? 0)) left.push(r.id);
+    }
+    if (left.length) await updateInside((ids) => left.forEach((id) => ids.delete(id)));
+    if (entered.length) await arrive(entered);
+  } catch {
+    // A background task must never throw.
+  }
+});
+
+/** Alert for each reminder we weren't already inside. */
+async function arrive(reminders: Reminder[]) {
+  let fresh: Reminder[] = [];
+  await updateInside((ids) => {
+    fresh = reminders.filter((r) => !ids.has(r.id));
+    fresh.forEach((r) => ids.add(r.id));
+  });
+  if (fresh.length === 0) return;
+
+  const dark = await overlayDarkMode();
+  await ensureChannel();
+  for (const r of fresh) {
+    const content = arrivalOverlayContent(r, dark);
     const { title, subtitle: near, notes } = content;
 
     // Android: pop the card over whatever is on screen (app open or not).
     // Otherwise queue it for the in-app modal on the next open.
     const overlay = showOverlay(content);
-    if (!overlay) await addArrival(match.id);
-    await ensureChannel();
+    if (!overlay) await addArrival(r.id);
 
     await Notifications.scheduleNotificationAsync({
+      // Fixed id: if both triggers race, the second replaces the first.
+      identifier: `arrival-${r.id}`,
       content: {
         title,
         body: notes ? `${near}\n${notes}` : near,
-        data: { reminderId: match.id, overlay },
+        data: { reminderId: r.id, overlay },
         sound: 'default',
         priority: Notifications.AndroidNotificationPriority.MAX,
       },
       trigger: Platform.OS === 'android' ? { channelId: CHANNEL_ID } : null,
     });
-  } catch {
-    // A background task must never throw.
   }
-});
+}
+
+async function storedReminders(): Promise<Reminder[]> {
+  const raw = await AsyncStorage.getItem(REMINDERS_KEY);
+  const list = raw ? JSON.parse(raw) : [];
+  return Array.isArray(list) ? list : [];
+}
+
+/** Read-modify-write the "currently inside" set. */
+async function updateInside(change: (ids: Set<string>) => void) {
+  let ids: Set<string>;
+  try {
+    const raw = await AsyncStorage.getItem(INSIDE_KEY);
+    ids = new Set(raw ? JSON.parse(raw) : []);
+  } catch {
+    ids = new Set();
+  }
+  change(ids);
+  await AsyncStorage.setItem(INSIDE_KEY, JSON.stringify([...ids]));
+}
+
+function distanceMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const rad = Math.PI / 180;
+  const dLat = (lat2 - lat1) * rad;
+  const dLng = (lng2 - lng1) * rad;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(dLng / 2) ** 2;
+  return 2 * 6371000 * Math.asin(Math.sqrt(a));
+}
 
 /* ---------------------------------------------------------------- setup */
 
@@ -232,12 +320,54 @@ async function isStarted(): Promise<boolean> {
   }
 }
 
+async function isWatching(): Promise<boolean> {
+  try {
+    return await Location.hasStartedLocationUpdatesAsync(WATCH_TASK);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Keep location fixes flowing while the app is closed (Android). Must be
+ * started while the app is in the foreground — Android blocks starting a
+ * location foreground service from the background.
+ */
+async function startWatching() {
+  if (Platform.OS !== 'android' || (await isWatching())) return;
+  try {
+    await Location.startLocationUpdatesAsync(WATCH_TASK, {
+      accuracy: Location.Accuracy.Balanced,
+      timeInterval: 60_000,
+      distanceInterval: 50,
+      foregroundService: {
+        notificationTitle: 'Location reminders on',
+        notificationBody: "You'll get an alert when you're near a reminder.",
+        notificationColor: '#F26722',
+        killServiceOnDestroy: false,
+      },
+    });
+  } catch (e) {
+    console.warn('startLocationUpdatesAsync failed', e);
+  }
+}
+
+async function stopWatching() {
+  if (await isWatching()) {
+    await Location.stopLocationUpdatesAsync(WATCH_TASK).catch(() => {});
+  }
+}
+
 /** Stable fingerprint of a region set — order-independent. */
 function signature(regions: Location.LocationRegion[]): string {
-  return regions
-    .map((r) => `${r.identifier}:${r.latitude},${r.longitude}@${r.radius}`)
-    .sort()
-    .join('|');
+  // "v2": regions gained notifyOnExit — forces one re-register on update.
+  return (
+    'v2|' +
+    regions
+      .map((r) => `${r.identifier}:${r.latitude},${r.longitude}@${r.radius}`)
+      .sort()
+      .join('|')
+  );
 }
 
 /**
@@ -266,16 +396,24 @@ export async function syncGeofences(reminders: Reminder[]): Promise<void> {
       longitude: r.location!.lng,
       radius: r.location!.radius ?? DEFAULT_RADIUS,
       notifyOnEnter: true,
-      notifyOnExit: false,
+      // Exits clear the "inside" mark so the next visit alerts again.
+      notifyOnExit: true,
     }));
+
+  // Forget "inside" marks for reminders that are gone, done or unlocated.
+  const active = new Set(regions.map((r) => r.identifier));
+  await updateInside((ids) => [...ids].forEach((id) => active.has(id) || ids.delete(id)));
 
   if (!enabled || state !== 'ready' || regions.length === 0) {
     if (await isStarted()) {
       await Location.stopGeofencingAsync(GEOFENCE_TASK).catch(() => {});
     }
+    await stopWatching();
     await AsyncStorage.removeItem(SIGNATURE_KEY);
     return;
   }
+
+  await startWatching();
 
   const next = signature(regions);
   const [prev, started] = await Promise.all([
