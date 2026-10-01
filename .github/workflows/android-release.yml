@@ -210,12 +210,17 @@ jobs:
               -F "caption=$caption" \
               -F "document=@$APK"
           else
-            echo "APK is $((size / 1024 / 1024)) MB — over Telegram's 50MB upload limit, sending a link instead"
-            text=$(printf '%s\n%s\n' "$caption" "" \
-              "Install: https://github.com/$REPO/releases/tag/android-latest")
+            echo "APK is $((size / 1024 / 1024)) MB — over Telegram's 50MB upload limit, sending a download link instead"
+            # Direct asset URL (not the release page) so tapping it starts the
+            # download right away.
+            url="https://github.com/$REPO/releases/download/android-latest/$APK"
+            text=$(printf '%s\n\n%s\n%s' "$caption" "Download APK ($((size / 1024 / 1024)) MB):" "$url")
+            markup=$(jq -nc --arg url "$url" \
+              '{inline_keyboard: [[{text: "⬇️ Download APK", url: $url}]]}')
             curl -sS --fail \
               "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
               --data-urlencode "chat_id=$TELEGRAM_CHAT_ID" \
               --data-urlencode "text=$text" \
+              --data-urlencode "reply_markup=$markup" \
               --data-urlencode "disable_web_page_preview=true"
           fi

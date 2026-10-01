@@ -207,18 +207,16 @@ internal object OverlayWindow {
       cornerRadius = dp(radius).toFloat()
     }
 
-    // Full-screen scrim: tap outside or press back → "Later".
+    // Full-screen scrim. The card stays until Open, Mark done or Later is
+    // tapped: taps outside and the back key are swallowed, not treated as "Later".
     val root = object : FrameLayout(ctx) {
       override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (event.keyCode == KeyEvent.KEYCODE_BACK) {
-          if (event.action == KeyEvent.ACTION_UP) later()
-          return true
-        }
+        if (event.keyCode == KeyEvent.KEYCODE_BACK) return true
         return super.dispatchKeyEvent(event)
       }
     }
     root.setBackgroundColor(Color.argb(115, 0, 0, 0))
-    root.setOnClickListener { later() }
+    root.isClickable = true // block touches to the app underneath
     root.isFocusableInTouchMode = true
 
     val card = LinearLayout(ctx).apply {
