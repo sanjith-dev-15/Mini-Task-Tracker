@@ -40,6 +40,7 @@ import {
   useExpenses,
   type Expense,
 } from '@/lib/expenses';
+import { smsSupported } from '../../../modules/sms-reader';
 
 const GOOD = '#10B981';
 
@@ -106,6 +107,18 @@ export default function ExpensesScreen() {
         <ThemedText type="subtitle" style={styles.flex}>
           Expenses
         </ThemedText>
+        {smsSupported && (
+          <Pressable
+            onPress={() => router.push('/expenses/import')}
+            accessibilityRole="button"
+            accessibilityLabel="Import expenses from bank SMS"
+            hitSlop={6}
+            style={styles.accountBtn}>
+            <View style={[styles.avatarFallback, { backgroundColor: theme.backgroundElement }]}>
+              <Ionicons name="chatbox-ellipses-outline" size={16} color={theme.accent} />
+            </View>
+          </Pressable>
+        )}
         <Pressable
           onPress={() => setShowAccount(true)}
           accessibilityRole="button"
@@ -275,7 +288,9 @@ export default function ExpensesScreen() {
               ? 'Loading…'
               : focusedDay
                 ? 'Nothing spent on this day.'
-                : 'Tap + to log your first expense.'}
+                : smsSupported
+                  ? 'Tap + to log your first expense, or import them from bank SMS.'
+                  : 'Tap + to log your first expense.'}
           </ThemedText>
         ) : (
           groups.map((g) => (

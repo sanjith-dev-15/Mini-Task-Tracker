@@ -29,6 +29,8 @@ export type Expense = {
   spentAt: number;
   createdAt: number;
   updatedAt: number;
+  /** Set when imported from a bank SMS (see `@/lib/bank-sms`) — stops re-imports. */
+  smsKey?: string;
 };
 
 export function emptyExpense(): Expense {
