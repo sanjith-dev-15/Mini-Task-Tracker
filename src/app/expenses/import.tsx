@@ -1,15 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
+import * as Clipboard from 'expo-clipboard';
+import { clearSharedPayloads, useIncomingShare } from 'expo-sharing';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import {
-  ActivityIndicator,
-  AppState,
-  Linking,
-  Modal,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  View,
-} from 'react-native';
+import { Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GlassIconButton } from '@/components/glass-icon-button';
@@ -18,98 +11,65 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { loadHandledSms, markSmsHandled, parseBankInbox, type BankTxn } from '@/lib/bank-sms';
+import { loadHandledSms, markSmsHandled, parseBankText, type BankTxn } from '@/lib/bank-sms';
 import { CATEGORIES, categoryOf, type CategoryKey } from '@/lib/expense-categories';
-import {
-  formatMoney,
-  fullDayLabel,
-  monthKey,
-  startOfDay,
-  useExpenses,
-} from '@/lib/expenses';
+import { formatMoney, fullDayLabel, monthKey, startOfDay, useExpenses } from '@/lib/expenses';
 import { goBack } from '@/lib/navigation';
-import {
-  hasSmsPermission,
-  readInbox,
-  requestSmsPermission,
-  smsSupported,
-} from '../../../modules/sms-reader';
 
 const GOOD = '#10B981';
-const DAY_MS = 86_400_000;
-const RANGES = [7, 30, 90] as const;
-
-type Access = 'granted' | 'ask' | 'blocked';
 
 /**
- * Expenses ▸ Import from SMS (Android). Reads bank alerts from the inbox,
- * lists the debits (as expenses, with a guessed category) and credits (added
- * to that month's "Money I have"), and adds the ticked ones. Everything is
- * parsed on the phone; the SMS text itself is never saved.
+ * Expenses ▸ Import from SMS. Bank alerts arrive by Share (Messages ▸ Share ▸
+ * Goku — routed here by `+native-intent.ts`) or by pasting; no SMS permission
+ * is involved. Debits become expenses with a guessed category, credits are
+ * added to that month's "Money I have". Parsing happens on the phone.
  */
 export default function ImportSmsScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const { expenses, income, addExpense, setMonthlyIncome } = useExpenses();
+  const { sharedPayloads } = useIncomingShare();
 
-  const [access, setAccess] = useState<Access>(() => (hasSmsPermission() ? 'granted' : 'ask'));
-  const [days, setDays] = useState<(typeof RANGES)[number]>(30);
-  const [txns, setTxns] = useState<BankTxn[] | null>(null);
+  const [text, setText] = useState('');
   const [handled, setHandled] = useState<Set<string>>(new Set());
-  const [error, setError] = useState<string | null>(null);
   const [unticked, setUnticked] = useState<Set<string>>(new Set());
+  const [categories, setCategories] = useState<Record<string, CategoryKey>>({});
   const [picking, setPicking] = useState<BankTxn | null>(null);
 
-  // Coming back from app settings — pick up a newly granted permission.
   useEffect(() => {
-    const sub = AppState.addEventListener('change', (s) => {
-      if (s === 'active' && hasSmsPermission()) setAccess('granted');
-    });
-    return () => sub.remove();
+    loadHandledSms().then(setHandled);
   }, []);
 
+  // Text shared from Messages (also when a new share arrives while this screen is open).
   useEffect(() => {
-    if (access !== 'granted') return;
-    let alive = true;
-    setTxns(null);
-    setError(null);
-    (async () => {
-      try {
-        const [inbox, done] = await Promise.all([
-          readInbox(Date.now() - days * DAY_MS),
-          loadHandledSms(),
-        ]);
-        if (!alive) return;
-        setHandled(done);
-        setTxns(parseBankInbox(inbox));
-      } catch (e) {
-        console.warn('Failed to read SMS', e);
-        if (alive) {
-          setError("Couldn't read your messages.");
-          setTxns([]);
-        }
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, [access, days]);
+    const shared = sharedPayloads
+      .filter((p) => p.shareType === 'text' || p.shareType === 'url')
+      .map((p) => p.value.trim())
+      .filter(Boolean);
+    if (shared.length > 0) setText(shared.join('\n\n'));
+  }, [sharedPayloads]);
 
+  const { txns, skipped } = useMemo(() => parseBankText(text), [text]);
   const imported = useMemo(
     () => new Set(expenses.map((e) => e.smsKey).filter((k): k is string => !!k)),
     [expenses],
   );
-  const fresh = useMemo(
-    () => (txns ?? []).filter((t) => !handled.has(t.key) && !imported.has(t.key)),
-    [txns, handled, imported],
-  );
+  const fresh = txns
+    .filter((t) => !handled.has(t.key) && !imported.has(t.key))
+    .map((t) => (categories[t.key] ? { ...t, category: categories[t.key] } : t));
+  const already = txns.length - fresh.length;
   const debits = fresh.filter((t) => t.kind === 'debit');
   const credits = fresh.filter((t) => t.kind === 'credit');
   const chosen = fresh.filter((t) => !unticked.has(t.key));
 
-  const allow = async () => {
-    const r = await requestSmsPermission();
-    setAccess(r === 'granted' ? 'granted' : r === 'blocked' ? 'blocked' : 'ask');
+  const paste = async () => {
+    const clip = (await Clipboard.getStringAsync()).trim();
+    if (clip) setText((cur) => (cur.trim() ? `${cur.trim()}\n\n${clip}` : clip));
+  };
+
+  const clear = () => {
+    setText('');
+    clearSharedPayloads();
   };
 
   const toggle = useCallback((key: string) => {
@@ -122,7 +82,7 @@ export default function ImportSmsScreen() {
   }, []);
 
   const setCategory = (key: string, category: CategoryKey) => {
-    setTxns((list) => list?.map((t) => (t.key === key ? { ...t, category } : t)) ?? null);
+    setCategories((prev) => ({ ...prev, [key]: category }));
     setPicking(null);
   };
 
@@ -147,8 +107,10 @@ export default function ImportSmsScreen() {
     for (const [m, { ref, total }] of incomeAdds) {
       setMonthlyIncome((income[m] ?? 0) + total, ref);
     }
-    // Unticked ones count as handled too, so the next import only shows new messages.
-    await markSmsHandled(fresh.map((t) => t.key)).catch(() => {});
+    await markSmsHandled(chosen.filter((t) => t.kind === 'credit').map((t) => t.key)).catch(
+      () => {},
+    );
+    clearSharedPayloads();
     goBack('/expenses');
   };
 
@@ -165,138 +127,126 @@ export default function ImportSmsScreen() {
         <View style={styles.headerSpacer} />
       </View>
 
-      {!smsSupported ? (
-        <Notice
-          icon="phone-portrait-outline"
-          text="Reading bank SMS works on Android, in a build that includes it. Install the latest APK and try again."
-        />
-      ) : access !== 'granted' ? (
-        <ScrollView contentContainerStyle={styles.body}>
-          <GlassSurface style={styles.permCard}>
-            <View style={[styles.permIcon, { backgroundColor: theme.accent + '1F' }]}>
-              <Ionicons name="chatbubbles" size={26} color={theme.accent} />
+      <ScrollView
+        style={styles.flex}
+        contentContainerStyle={styles.body}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}>
+        {Platform.OS === 'android' && (
+          <GlassSurface style={styles.howCard}>
+            <View style={[styles.howIcon, { backgroundColor: theme.accent + '1F' }]}>
+              <Ionicons name="share-social" size={18} color={theme.accent} />
             </View>
-            <ThemedText type="subtitle" style={styles.center}>
-              Add expenses from bank SMS
-            </ThemedText>
-            <ThemedText type="small" themeColor="textSecondary" style={styles.center}>
-              Goku reads the debit and credit alerts your bank sends, so you don't have to type
-              them. OTPs and personal chats are ignored, and your messages never leave this phone.
-            </ThemedText>
-            <Pressable
-              onPress={access === 'blocked' ? () => Linking.openSettings() : allow}
-              style={({ pressed }) => [
-                styles.primaryBtn,
-                { backgroundColor: theme.accent, opacity: pressed ? 0.85 : 1 },
-              ]}>
-              <ThemedText type="smallBold" style={styles.white}>
-                {access === 'blocked' ? 'Open app settings' : 'Allow SMS access'}
-              </ThemedText>
-            </Pressable>
-            <ThemedText type="small" themeColor="textSecondary" style={styles.center}>
-              {access === 'blocked'
-                ? 'Turn on Permissions ▸ SMS. '
-                : ''}
-              If Android says “Restricted setting”: open App info ▸ ⋮ (top right) ▸ Allow
-              restricted settings, then allow SMS.
+            <ThemedText type="small" themeColor="textSecondary" style={styles.flex}>
+              In your Messages app, long-press a bank SMS ▸{' '}
+              <ThemedText type="smallBold">Share</ThemedText> ▸{' '}
+              <ThemedText type="smallBold">Goku</ThemedText>. Or copy several and paste them
+              below.
             </ThemedText>
           </GlassSurface>
-        </ScrollView>
-      ) : (
-        <>
-          <View style={styles.ranges}>
-            {RANGES.map((d) => {
-              const active = d === days;
-              return (
-                <Pressable
-                  key={d}
-                  onPress={() => setDays(d)}
-                  style={[
-                    styles.rangeChip,
-                    { backgroundColor: active ? theme.accent : theme.backgroundElement },
-                  ]}>
-                  <ThemedText
-                    type="smallBold"
-                    style={{ color: active ? '#fff' : theme.textSecondary }}>
-                    Last {d} days
-                  </ThemedText>
-                </Pressable>
-              );
-            })}
-          </View>
+        )}
 
-          {txns == null ? (
-            <View style={styles.centerFill}>
-              <ActivityIndicator color={theme.accent} />
-              <ThemedText type="small" themeColor="textSecondary">
-                Reading bank messages…
-              </ThemedText>
-            </View>
-          ) : fresh.length === 0 ? (
-            <Notice
-              icon={error ? 'alert-circle-outline' : 'checkmark-done-outline'}
-              text={error ?? `No new bank transactions in the last ${days} days.`}
-            />
-          ) : (
-            <ScrollView
-              style={styles.flex}
-              contentContainerStyle={styles.body}
-              showsVerticalScrollIndicator={false}>
-              {debits.length > 0 && (
-                <Section title={`SPENT · ${debits.length}`}>
-                  {debits.map((t, i) => (
-                    <TxnRow
-                      key={t.key}
-                      txn={t}
-                      divider={i > 0}
-                      ticked={!unticked.has(t.key)}
-                      onToggle={() => toggle(t.key)}
-                      onPickCategory={() => setPicking(t)}
-                    />
-                  ))}
-                </Section>
-              )}
-              {credits.length > 0 && (
-                <Section
-                  title={`RECEIVED · ${credits.length}`}
-                  note="Added to that month's “Money I have”.">
-                  {credits.map((t, i) => (
-                    <TxnRow
-                      key={t.key}
-                      txn={t}
-                      divider={i > 0}
-                      ticked={!unticked.has(t.key)}
-                      onToggle={() => toggle(t.key)}
-                    />
-                  ))}
-                </Section>
-              )}
-            </ScrollView>
-          )}
-
-          {fresh.length > 0 && (
-            <View style={[styles.footer, { paddingBottom: insets.bottom + Spacing.two }]}>
-              <Pressable
-                onPress={addChosen}
-                disabled={chosen.length === 0}
-                style={({ pressed }) => [
-                  styles.primaryBtn,
-                  {
-                    backgroundColor: theme.accent,
-                    opacity: chosen.length === 0 ? 0.4 : pressed ? 0.85 : 1,
-                  },
-                ]}>
-                <Ionicons name="add" size={20} color="#fff" />
-                <ThemedText type="smallBold" style={styles.white}>
-                  Add {chosen.length} {chosen.length === 1 ? 'transaction' : 'transactions'}
+        <View style={[styles.inputBox, { backgroundColor: theme.backgroundElement }]}>
+          <TextInput
+            value={text}
+            onChangeText={setText}
+            placeholder="Paste bank SMS here…"
+            placeholderTextColor={theme.textSecondary}
+            multiline
+            textAlignVertical="top"
+            style={[styles.input, { color: theme.text }]}
+          />
+          <View style={styles.inputActions}>
+            {text.length > 0 && (
+              <Pressable onPress={clear} hitSlop={6} style={styles.inputBtn}>
+                <Ionicons name="close-circle-outline" size={16} color={theme.textSecondary} />
+                <ThemedText type="smallBold" themeColor="textSecondary">
+                  Clear
                 </ThemedText>
               </Pressable>
-              <ThemedText type="small" themeColor="textSecondary" style={styles.center}>
-                Unticked ones won't be shown again.
+            )}
+            <Pressable
+              onPress={paste}
+              hitSlop={6}
+              style={[styles.inputBtn, styles.pasteBtn, { backgroundColor: theme.accent }]}>
+              <Ionicons name="clipboard-outline" size={15} color="#fff" />
+              <ThemedText type="smallBold" style={styles.white}>
+                Paste
               </ThemedText>
-            </View>
-          )}
-        </>
+            </Pressable>
+          </View>
+        </View>
+
+        {text.trim().length > 0 && (
+          <>
+            {fresh.length === 0 && (
+              <ThemedText type="small" themeColor="textSecondary" style={styles.center}>
+                {already > 0
+                  ? 'These transactions are already added.'
+                  : 'No bank transactions found in this text.'}
+              </ThemedText>
+            )}
+            {debits.length > 0 && (
+              <Section title={`SPENT · ${debits.length}`}>
+                {debits.map((t, i) => (
+                  <TxnRow
+                    key={t.key}
+                    txn={t}
+                    divider={i > 0}
+                    ticked={!unticked.has(t.key)}
+                    onToggle={() => toggle(t.key)}
+                    onPickCategory={() => setPicking(t)}
+                  />
+                ))}
+              </Section>
+            )}
+            {credits.length > 0 && (
+              <Section
+                title={`RECEIVED · ${credits.length}`}
+                note="Added to that month's “Money I have”.">
+                {credits.map((t, i) => (
+                  <TxnRow
+                    key={t.key}
+                    txn={t}
+                    divider={i > 0}
+                    ticked={!unticked.has(t.key)}
+                    onToggle={() => toggle(t.key)}
+                  />
+                ))}
+              </Section>
+            )}
+            {fresh.length > 0 && (already > 0 || skipped > 0) && (
+              <ThemedText type="small" themeColor="textSecondary" style={styles.center}>
+                {[
+                  already > 0 && `${already} already added`,
+                  skipped > 0 && `${skipped} not a bank transaction`,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </ThemedText>
+            )}
+          </>
+        )}
+      </ScrollView>
+
+      {fresh.length > 0 && (
+        <View style={[styles.footer, { paddingBottom: insets.bottom + Spacing.two }]}>
+          <Pressable
+            onPress={addChosen}
+            disabled={chosen.length === 0}
+            style={({ pressed }) => [
+              styles.primaryBtn,
+              {
+                backgroundColor: theme.accent,
+                opacity: chosen.length === 0 ? 0.4 : pressed ? 0.85 : 1,
+              },
+            ]}>
+            <Ionicons name="add" size={20} color="#fff" />
+            <ThemedText type="smallBold" style={styles.white}>
+              Add {chosen.length} {chosen.length === 1 ? 'transaction' : 'transactions'}
+            </ThemedText>
+          </Pressable>
+        </View>
       )}
 
       <Modal
@@ -348,18 +298,6 @@ export default function ImportSmsScreen() {
   );
 }
 
-function Notice({ icon, text }: { icon: keyof typeof Ionicons.glyphMap; text: string }) {
-  const theme = useTheme();
-  return (
-    <View style={styles.centerFill}>
-      <Ionicons name={icon} size={32} color={theme.textSecondary} />
-      <ThemedText type="small" themeColor="textSecondary" style={styles.center}>
-        {text}
-      </ThemedText>
-    </View>
-  );
-}
-
 function Section({
   title,
   note,
@@ -403,6 +341,7 @@ function TxnRow({
   const credit = txn.kind === 'credit';
   const cat = categoryOf(txn.category);
   const color = credit ? GOOD : cat.color;
+  const when = txn.dated ? fullDayLabel(txn.date) : 'Today (no date in SMS)';
 
   return (
     <Pressable
@@ -430,10 +369,12 @@ function TxnRow({
       <View style={[styles.flex, !ticked && styles.dim]}>
         <ThemedText numberOfLines={1}>{txn.title}</ThemedText>
         <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
-          {credit ? txn.bank : cat.label} · {fullDayLabel(txn.date)}
+          {credit ? txn.bank : cat.label} · {when}
         </ThemedText>
       </View>
-      <ThemedText type="smallBold" style={[{ color: credit ? GOOD : theme.text }, !ticked && styles.dim]}>
+      <ThemedText
+        type="smallBold"
+        style={[{ color: credit ? GOOD : theme.text }, !ticked && styles.dim]}>
         {formatMoney(txn.amount, { sign: credit })}
       </ThemedText>
     </Pressable>
@@ -462,39 +403,34 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     gap: Spacing.three,
   },
-  centerFill: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: Spacing.two,
-    padding: Spacing.four,
-  },
 
-  permCard: { alignItems: 'center', padding: Spacing.four, gap: Spacing.two },
-  permIcon: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: Spacing.one,
-  },
-
-  ranges: {
+  howCard: {
     flexDirection: 'row',
-    gap: Spacing.two,
-    paddingHorizontal: Spacing.three,
-    paddingBottom: Spacing.three,
-    width: '100%',
-    maxWidth: MaxContentWidth,
-    alignSelf: 'center',
+    alignItems: 'center',
+    gap: Spacing.three,
+    padding: Spacing.three,
   },
-  rangeChip: {
-    flex: 1,
+  howIcon: {
+    width: 36,
     height: 36,
-    borderRadius: 10,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+
+  inputBox: { borderRadius: 14, padding: Spacing.three, gap: Spacing.two },
+  input: { minHeight: 96, maxHeight: 200, fontSize: 14, padding: 0 },
+  inputActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    gap: Spacing.three,
+  },
+  inputBtn: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  pasteBtn: {
+    height: 32,
+    borderRadius: 16,
+    paddingHorizontal: Spacing.three,
   },
 
   section: { gap: Spacing.two },
@@ -523,17 +459,14 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: MaxContentWidth,
     alignSelf: 'center',
-    gap: Spacing.two,
   },
   primaryBtn: {
-    alignSelf: 'stretch',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: Spacing.two,
     height: 52,
     borderRadius: 16,
-    marginTop: Spacing.one,
   },
 
   modalScrim: {
