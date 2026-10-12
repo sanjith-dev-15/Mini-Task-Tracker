@@ -1,21 +1,23 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import type { CategoryKey } from '@/lib/expense-categories';
-import type { InboxSms } from '../../modules/sms-reader';
 
 /**
- * Turns Indian bank / UPI alert SMS into transactions for Expenses ▸ Import
- * from SMS. Runs entirely on the device; only the parsed fields are kept.
+ * Turns Indian bank / UPI alert SMS — shared into the app or pasted — into
+ * transactions for Expenses ▸ Import from SMS. Runs entirely on the device
+ * (no SMS permission); only the parsed fields are kept.
  */
 export type BankTxn = {
-  /** Stable across devices (received time + amount) — used to skip re-imports. */
+  /** Hash of the message text — used to skip re-imports. */
   key: string;
   kind: 'debit' | 'credit';
   amount: number;
   title: string;
   category: CategoryKey;
-  /** When the SMS arrived, epoch ms. */
+  /** Transaction day from the message (noon), or now when it has none. */
   date: number;
+  /** False when the message had no date and `date` fell back to now. */
+  dated: boolean;
   bank: string;
   body: string;
 };
@@ -134,14 +136,53 @@ const CATEGORY_WORDS: [CategoryKey, string[]][] = [
   ],
 ];
 
-function bankOf(address: string): string {
-  const parts = address.toUpperCase().split(/[^A-Z0-9]+/).filter(Boolean);
-  for (const p of parts) {
-    // Some headers carry a prefix letter (IPAYTM), so longer names may sit mid-word.
-    const hit = BANKS.find(([name]) => p.startsWith(name) || (name.length >= 5 && p.includes(name)));
+/** Bank named in the message text ("HDFC Bank", "-SBI", "Paytm Balance"). */
+function bankOf(body: string): string {
+  for (const w of body.toUpperCase().split(/[^A-Z0-9]+/).filter(Boolean)) {
+    const hit = BANKS.find(([name]) => w === name || (name.length >= 4 && w.startsWith(name)));
     if (hit) return hit[1];
   }
   return 'Bank';
+}
+
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+const DAY_MS = 86_400_000;
+
+/** A real calendar day, not in the future and not more than ~a year back. */
+function validDay(y: number, m: number, d: number, now: number): number | null {
+  const year = y < 100 ? 2000 + y : y;
+  const dt = new Date(year, m - 1, d, 12);
+  if (dt.getFullYear() !== year || dt.getMonth() !== m - 1 || dt.getDate() !== d) return null;
+  const t = dt.getTime();
+  return t <= now + DAY_MS && t >= now - 400 * DAY_MS ? t : null;
+}
+
+/**
+ * Transaction date written in the SMS — "12/10/26", "12-10-2026", "12Oct26",
+ * "12-Oct-26", "2026-10-12". Shared / pasted text has no received time.
+ */
+function dateIn(body: string, now: number): number | null {
+  for (const m of body.matchAll(/\b(\d{4})-(\d{1,2})-(\d{1,2})\b/g)) {
+    const t = validDay(+m[1], +m[2], +m[3], now);
+    if (t) return t;
+  }
+  for (const m of body.matchAll(/\b(\d{1,2})[-/.](\d{1,2})[-/.](\d{4}|\d{2})\b/g)) {
+    const t = validDay(+m[3], +m[2], +m[1], now);
+    if (t) return t;
+  }
+  const mon = new RegExp(String.raw`\b(\d{1,2})[-\s]?(${MONTHS.join('|')})[a-z]*[-\s,]*(\d{4}|\d{2})\b`, 'gi');
+  for (const m of body.matchAll(mon)) {
+    const t = validDay(+m[3], MONTHS.indexOf(m[2].toLowerCase()) + 1, +m[1], now);
+    if (t) return t;
+  }
+  return null;
+}
+
+/** Short stable hash (djb2) — the dedupe key for a message. */
+function hash(s: string): string {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(36);
 }
 
 function toNumber(s: string): number {
@@ -239,11 +280,9 @@ function guessCategory(who: string | null, body: string): CategoryKey {
   return fromName !== 'other' ? fromName : categoryOfText(body);
 }
 
-/** One SMS → a transaction, or null if it isn't a completed bank debit / credit. */
-export function parseBankSms(sms: InboxSms): BankTxn | null {
-  const body = sms.body.replace(/\s+/g, ' ').trim();
-  // Personal numbers send chats, not bank alerts (banks use headers like VM-HDFCBK).
-  if (/^\+?\d{10,}$/.test(sms.address.trim())) return null;
+/** One message → a transaction, or null if it isn't a completed bank debit / credit. */
+export function parseBankSms(text: string, now: number = Date.now()): BankTxn | null {
+  const body = text.replace(/\s+/g, ' ').trim();
   if (SKIP_RE.test(body)) return null;
 
   const kind = kindOf(body);
@@ -251,25 +290,60 @@ export function parseBankSms(sms: InboxSms): BankTxn | null {
   const amount = amountOf(body);
   if (amount == null || amount >= 1e8) return null;
 
-  const bank = bankOf(sms.address);
+  const bank = bankOf(body);
   const who = counterpartyOf(body, kind);
   const title = who ?? (kind === 'debit' ? `${bank} payment` : `${bank} credit`);
+  const day = dateIn(body, now);
 
   return {
-    key: `sms:${sms.date}:${amount}`,
+    key: `sms:${hash(body.toLowerCase())}`,
     kind,
     amount,
     title,
     category: kind === 'debit' ? guessCategory(who, body) : 'other',
-    date: sms.date,
+    date: day ?? now,
+    dated: day != null,
     bank,
     body,
   };
 }
 
 /**
- * Keys of SMS already handled on this device — imported (credits have no
- * expense row to carry `smsKey`) or unticked and skipped — so they don't show again.
+ * Shared or pasted text → transactions. Messages are split on blank lines;
+ * a block whose lines each parse on their own (one message per line) is
+ * split by line instead. `skipped` counts blocks that weren't bank alerts.
+ */
+export function parseBankText(
+  text: string,
+  now: number = Date.now(),
+): { txns: BankTxn[]; skipped: number } {
+  const seen = new Set<string>();
+  const txns: BankTxn[] = [];
+  let skipped = 0;
+  const add = (t: BankTxn) => {
+    if (seen.has(t.key)) return;
+    seen.add(t.key);
+    txns.push(t);
+  };
+
+  for (const block of text.split(/\n\s*\n/).map((b) => b.trim()).filter(Boolean)) {
+    const lines = block.split('\n').map((l) => l.trim()).filter(Boolean);
+    const perLine = lines.length > 1 ? lines.map((l) => parseBankSms(l, now)) : [];
+    const lineHits = perLine.filter((t): t is BankTxn => t != null);
+    if (lineHits.length >= 2) {
+      lineHits.forEach(add);
+      continue;
+    }
+    const whole = parseBankSms(block, now);
+    if (whole) add(whole);
+    else skipped++;
+  }
+  return { txns, skipped };
+}
+
+/**
+ * Keys of credits already added on this device (debits carry `smsKey` on the
+ * expense itself), so sharing the same SMS twice doesn't count it twice.
  */
 const HANDLED_KEY = 'expenses:sms-handled:v1';
 
@@ -288,16 +362,4 @@ export async function markSmsHandled(keys: string[]): Promise<void> {
   const set = await loadHandledSms();
   for (const k of keys) set.add(k);
   await AsyncStorage.setItem(HANDLED_KEY, JSON.stringify([...set]));
-}
-
-export function parseBankInbox(list: InboxSms[]): BankTxn[] {
-  const seen = new Set<string>();
-  const out: BankTxn[] = [];
-  for (const sms of list) {
-    const t = parseBankSms(sms);
-    if (!t || seen.has(t.key)) continue;
-    seen.add(t.key);
-    out.push(t);
-  }
-  return out;
 }

@@ -1,4 +1,0 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-  <!-- Read bank alerts from the SMS inbox for "Import from SMS" in Expenses. -->
-  <uses-permission android:name="android.permission.READ_SMS" />
-</manifest>
