@@ -45,6 +45,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history, for the "What's new" notes in version.json
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -130,6 +132,35 @@ jobs:
           echo "path=$dest" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
+      # The app's in-app updater (src/lib/app-update.ts) reads this to decide
+      # whether a newer build exists and what to show under "What's new".
+      - name: Write version.json
+        env:
+          BEFORE: ${{ github.event.before }}
+          APK: ${{ steps.apk.outputs.path }}
+          VERSION: ${{ steps.apk.outputs.version }}
+        run: |
+          set -e
+          if [ -n "$BEFORE" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            range="$BEFORE..$GITHUB_SHA"
+          else
+            range="-n 5 $GITHUB_SHA"
+          fi
+          git log --no-merges --format='%s' $range | head -n 12 > notes.txt
+          node -e '
+            const fs = require("fs");
+            const notes = fs.readFileSync("notes.txt", "utf8").split("\n").map((s) => s.trim()).filter(Boolean);
+            fs.writeFileSync("version.json", JSON.stringify({
+              versionCode: Number(process.env.GITHUB_RUN_NUMBER),
+              versionName: process.env.VERSION,
+              apk: process.env.APK,
+              notes,
+              commit: process.env.GITHUB_SHA,
+              publishedAt: new Date().toISOString(),
+            }, null, 2) + "\n");
+          '
+          cat version.json
+
       - name: Trim old APKs (keep the previous build alongside the new one)
         env:
           GH_TOKEN: ${{ github.token }}
@@ -165,7 +196,10 @@ jobs:
 
             - App version: **${{ steps.apk.outputs.version }}** (versionCode ${{ github.run_number }})
             - arm64-v8a only. Sideload: enable "Install unknown apps", then open the APK.
-          files: ${{ steps.apk.outputs.path }}
+          overwrite_files: true
+          files: |
+            ${{ steps.apk.outputs.path }}
+            version.json
 
       # Ping me when a build ships. Optional — skipped unless the two secrets
       # exist. One-time setup:

@@ -8,6 +8,7 @@ import type { Reminder } from '@/lib/reminders';
 import {
   overlaySupported,
   showOverlay,
+  startAlarm,
   type OverlayContent,
 } from '../../modules/reminder-overlay';
 
@@ -144,8 +145,13 @@ async function arrive(reminders: Reminder[]) {
 
     // Android: pop the card over whatever is on screen (app open or not).
     // Otherwise queue it for the in-app modal on the next open.
+    // The card rings until it's answered; without one, ring anyway — it stops
+    // when the app is opened or the notification tapped (see ArrivalModal).
     const overlay = showOverlay(content);
-    if (!overlay) await addArrival(r.id);
+    if (!overlay) {
+      await addArrival(r.id);
+      startAlarm();
+    }
 
     await Notifications.scheduleNotificationAsync({
       // Fixed id: if both triggers race, the second replaces the first.

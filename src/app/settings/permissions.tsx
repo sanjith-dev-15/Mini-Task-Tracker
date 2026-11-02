@@ -39,6 +39,13 @@ import {
   type PermStatus,
 } from '@/lib/permissions';
 import { useReminders } from '@/lib/reminders';
+import { useThemeContext } from '@/lib/theme';
+import {
+  overlaySupported,
+  showOverlay,
+  startAlarm,
+  stopAlarm,
+} from '../../../modules/reminder-overlay';
 
 export default function PermissionsScreen() {
   const theme = useTheme();
@@ -184,6 +191,7 @@ const GEO_HINT: Record<GeofenceState, string> = {
 function LocationRemindersControl() {
   const theme = useTheme();
   const { reminders } = useReminders();
+  const { scheme } = useThemeContext();
   const { alert, showAlert } = useGlassAlert();
   const [enabled, setEnabled] = useState(false);
   const [state, setState] = useState<GeofenceState>('needs-location');
@@ -245,6 +253,28 @@ function LocationRemindersControl() {
 
   const on = enabled && state === 'ready';
 
+  // Fire a fake arrival so the alert (card + alarm + vibration) can be tried out.
+  const testAlert = () => {
+    const shown = showOverlay({
+      id: 'test-alert',
+      title: 'Test reminder',
+      subtitle: "You're near a place you set a reminder",
+      notes: 'This is how a location reminder alerts you. Tap any button to stop the alarm.',
+      url: 'app://settings/permissions',
+      dark: scheme === 'dark',
+    });
+    if (shown) return;
+    startAlarm();
+    showAlert({
+      icon: 'alarm-outline',
+      tone: 'accent',
+      title: 'Ringing',
+      message:
+        'Without "Display over other apps" you get this alarm and a notification, but not the card over other apps.',
+      actions: [{ label: 'Stop', onPress: () => stopAlarm(true) }],
+    });
+  };
+
   return (
     <>
       {alert}
@@ -273,6 +303,13 @@ function LocationRemindersControl() {
         <Pressable onPress={() => Linking.openSettings()} style={styles.cardAction}>
           <ThemedText type="smallBold" style={{ color: theme.accent }}>
             Open system settings
+          </ThemedText>
+        </Pressable>
+      )}
+      {overlaySupported && (
+        <Pressable onPress={testAlert} style={styles.cardAction}>
+          <ThemedText type="smallBold" style={{ color: theme.accent }}>
+            Test alert (sound + vibration)
           </ThemedText>
         </Pressable>
       )}

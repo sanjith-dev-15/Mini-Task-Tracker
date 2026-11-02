@@ -26,19 +26,23 @@ import { useTheme } from '@/hooks/use-theme';
 import { useAuth } from '@/lib/auth';
 import { categoryOf } from '@/lib/expense-categories';
 import {
-  currentMonthName,
-  daysElapsedThisMonth,
+  daysElapsedIn,
   formatMoney,
   fullDayLabel,
   groupByDay,
-  lastMonth,
+  inRange,
+  isCurrentRange,
   monthKey,
+  periodLabel,
+  periodRange,
+  shiftPeriod,
   spendByDay,
+  startOfDay,
   sumAmount,
-  thisMonth,
   totalsByCategory,
   useExpenses,
   type Expense,
+  type Period,
 } from '@/lib/expenses';
 
 const GOOD = '#10B981';
@@ -50,43 +54,70 @@ export default function ExpensesScreen() {
   const { user } = useAuth();
   const [showAccount, setShowAccount] = useState(false);
 
-  const monthName = currentMonthName();
-  const monthIncome = income[monthKey()] ?? 0;
-  const { monthList, monthTotal, delta, perDay, cats } = useMemo(() => {
-    const list = thisMonth(expenses);
-    const total = sumAmount(list);
-    const lastTotal = sumAmount(lastMonth(expenses));
-    return {
-      monthList: list,
-      monthTotal: total,
-      delta: lastTotal > 0 ? (total - lastTotal) / lastTotal : null,
-      perDay: total / daysElapsedThisMonth(),
-      cats: totalsByCategory(list),
-    };
-  }, [expenses]);
-
-  const allGroups = useMemo(() => groupByDay(expenses), [expenses]);
-  const dayMap = useMemo(() => spendByDay(expenses), [expenses]);
-
+  const [period, setPeriod] = useState<Period>('month');
+  const [anchor, setAnchor] = useState(() => startOfDay());
   const [focusedDay, setFocusedDay] = useState<number | null>(null);
   const [showCal, setShowCal] = useState(false);
 
+  const range = periodRange(period, anchor);
+  const current = isCurrentRange(range);
+  const label = periodLabel(period, range);
+  const monthName = periodLabel('month', periodRange('month', anchor));
+
+  const { periodList, periodTotal, delta, perDay, cats } = useMemo(() => {
+    const r = periodRange(period, anchor);
+    const list = inRange(expenses, r);
+    const total = sumAmount(list);
+    const prevTotal = sumAmount(inRange(expenses, periodRange(period, shiftPeriod(period, anchor, -1))));
+    return {
+      periodList: list,
+      periodTotal: total,
+      delta: prevTotal > 0 ? (total - prevTotal) / prevTotal : null,
+      perDay: total / daysElapsedIn(r),
+      cats: totalsByCategory(list),
+    };
+  }, [expenses, period, anchor]);
+
+  const dayMap = useMemo(() => spendByDay(expenses), [expenses]);
+  const allGroups = useMemo(() => groupByDay(periodList), [periodList]);
+
+  // "Money I have" is per month; shown in the Month view only.
+  const incomeRef = range.start;
+  const monthIncome = income[monthKey(incomeRef)] ?? 0;
   const [showIncome, setShowIncome] = useState(false);
   const [incomeStr, setIncomeStr] = useState('');
-  const remaining = monthIncome - monthTotal;
+  const remaining = monthIncome - periodTotal;
 
   const openIncome = () => {
     setIncomeStr(monthIncome ? String(monthIncome) : '');
     setShowIncome(true);
   };
   const saveIncome = () => {
-    setMonthlyIncome(parseFloat(incomeStr || '0') || 0);
+    setMonthlyIncome(parseFloat(incomeStr || '0') || 0, incomeRef);
     setShowIncome(false);
   };
   const clearIncome = () => {
-    setMonthlyIncome(0);
+    setMonthlyIncome(0, incomeRef);
     setShowIncome(false);
   };
+
+  const shift = (delta: number) => {
+    setAnchor((a) => shiftPeriod(period, a, delta));
+    setFocusedDay(null);
+  };
+  const switchPeriod = (p: Period) => {
+    setPeriod(p);
+    // Keep the day in view: a picked day, or today when looking at this month/week.
+    if (focusedDay == null && current) setAnchor(startOfDay());
+  };
+
+  const kicker =
+    period === 'week'
+      ? current
+        ? 'SPENT THIS WEEK'
+        : `SPENT ${label.toUpperCase()}`
+      : `SPENT IN ${label.toUpperCase()}`;
+
   const groups = focusedDay
     ? allGroups.filter((g) => g.key === String(focusedDay))
     : allGroups;
@@ -137,16 +168,60 @@ export default function ExpensesScreen() {
             </View>
           )}
         </Pressable>
-        <View style={[styles.monthPill, { backgroundColor: theme.backgroundElement }]}>
-          <ThemedText type="smallBold" themeColor="textSecondary">
-            {monthName}
-          </ThemedText>
-        </View>
       </View>
 
       <ScrollView
         contentContainerStyle={[styles.body, { paddingBottom: bottomPad }]}
         showsVerticalScrollIndicator={false}>
+        {/* ---------- week / month ---------- */}
+        <View style={styles.periodBar}>
+          <View style={[styles.segment, { backgroundColor: theme.backgroundElement }]}>
+            {(['week', 'month'] as const).map((p) => (
+              <Pressable
+                key={p}
+                onPress={() => switchPeriod(p)}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: period === p }}
+                style={[styles.segmentItem, period === p && { backgroundColor: theme.accent }]}>
+                <ThemedText
+                  type="smallBold"
+                  style={{ color: period === p ? '#fff' : theme.textSecondary }}>
+                  {p === 'week' ? 'Week' : 'Month'}
+                </ThemedText>
+              </Pressable>
+            ))}
+          </View>
+          <View style={styles.periodNav}>
+            <Pressable
+              onPress={() => shift(-1)}
+              hitSlop={8}
+              accessibilityLabel={`Previous ${period}`}
+              style={styles.periodArrow}>
+              <Ionicons name="chevron-back" size={18} color={theme.text} />
+            </Pressable>
+            <Pressable
+              onPress={() => setShowCal(true)}
+              accessibilityLabel="Pick a date"
+              style={styles.periodLabel}>
+              <ThemedText type="smallBold" numberOfLines={1}>
+                {label}
+              </ThemedText>
+            </Pressable>
+            <Pressable
+              onPress={() => shift(1)}
+              disabled={current}
+              hitSlop={8}
+              accessibilityLabel={`Next ${period}`}
+              style={styles.periodArrow}>
+              <Ionicons
+                name="chevron-forward"
+                size={18}
+                color={current ? theme.border : theme.text}
+              />
+            </Pressable>
+          </View>
+        </View>
+
         {/* ---------- hero ---------- */}
         <GlassSurface glass="clear" radius={28} style={styles.hero}>
           <View style={[styles.blob, styles.blobA, { backgroundColor: theme.accent }]} />
@@ -155,16 +230,16 @@ export default function ExpensesScreen() {
 
           <View style={styles.heroInner}>
             <ThemedText type="smallBold" style={[styles.kicker, { color: theme.textSecondary }]}>
-              SPENT IN {monthName.toUpperCase()}
+              {kicker}
             </ThemedText>
             <ThemedText style={[styles.heroAmount, { color: theme.text }]}>
-              {formatMoney(monthTotal)}
+              {formatMoney(periodTotal)}
             </ThemedText>
 
             <View style={styles.heroMeta}>
               <ThemedText type="small" themeColor="textSecondary">
-                {monthList.length} {monthList.length === 1 ? 'entry' : 'entries'}
-                {monthTotal > 0 ? ` · ${formatMoney(perDay)}/day` : ''}
+                {periodList.length} {periodList.length === 1 ? 'entry' : 'entries'}
+                {periodTotal > 0 ? ` · ${formatMoney(perDay)}/day` : ''}
               </ThemedText>
               {delta != null && (
                 <GlassSurface
@@ -185,7 +260,7 @@ export default function ExpensesScreen() {
               )}
             </View>
 
-            {monthIncome > 0 ? (
+            {period === 'week' ? null : monthIncome > 0 ? (
               <Pressable
                 onPress={openIncome}
                 accessibilityLabel="Edit monthly income"
@@ -230,7 +305,9 @@ export default function ExpensesScreen() {
 
           {cats.length === 0 ? (
             <ThemedText type="small" themeColor="textSecondary">
-              {loading ? 'Loading…' : 'No spending logged this month yet.'}
+              {loading
+                ? 'Loading…'
+                : `No spending logged ${current ? `this ${period}` : `in ${label}`} yet.`}
             </ThemedText>
           ) : (
             <>
@@ -245,7 +322,7 @@ export default function ExpensesScreen() {
               <View style={styles.legend}>
                 {cats.map((c) => {
                   const cat = categoryOf(c.key);
-                  const pct = Math.round((c.total / monthTotal) * 100);
+                  const pct = Math.round((c.total / periodTotal) * 100);
                   return (
                     <View key={c.key} style={styles.legendItem}>
                       <View style={[styles.dot, { backgroundColor: cat.color }]} />
@@ -268,7 +345,11 @@ export default function ExpensesScreen() {
         {/* ---------- recent ---------- */}
         <View style={styles.recentHead}>
           <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
-            {focusedDay ? fullDayLabel(focusedDay).toUpperCase() : 'RECENT'}
+            {focusedDay
+              ? fullDayLabel(focusedDay).toUpperCase()
+              : current
+                ? 'RECENT'
+                : label.toUpperCase()}
           </ThemedText>
           {focusedDay && (
             <Pressable onPress={() => setFocusedDay(null)} hitSlop={8}>
@@ -285,7 +366,9 @@ export default function ExpensesScreen() {
               ? 'Loading…'
               : focusedDay
                 ? 'Nothing spent on this day.'
-                : 'Tap + to log your first expense, or import them from bank SMS.'}
+                : expenses.length > 0
+                  ? `Nothing spent ${current ? `this ${period}` : `in ${label}`}.`
+                  : 'Tap + to log your first expense, or import them from bank SMS.'}
           </ThemedText>
         ) : (
           groups.map((g) => (
@@ -360,9 +443,20 @@ export default function ExpensesScreen() {
             <MonthCalendar
               maxToday
               selected={focusedDay}
+              initialDate={anchor}
               spendByDay={dayMap}
+              monthSummary={(start, end) => (
+                <ThemedText type="small" themeColor="textSecondary">
+                  Spent {formatMoney(sumAmount(inRange(expenses, { start, end })))}
+                </ThemedText>
+              )}
               onSelect={(ts) => {
-                setFocusedDay((cur) => (cur === ts ? null : ts));
+                if (focusedDay === ts) {
+                  setFocusedDay(null);
+                } else {
+                  setFocusedDay(ts);
+                  setAnchor(ts);
+                }
                 setShowCal(false);
               }}
             />
@@ -613,13 +707,21 @@ const styles = StyleSheet.create({
     paddingRight: Spacing.three,
     paddingBottom: Spacing.two,
   },
-  monthPill: {
-    height: 24,
-    borderRadius: 12,
-    paddingHorizontal: Spacing.two,
+  periodBar: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.two,
   },
+  segment: { flexDirection: 'row', borderRadius: 999, padding: 3 },
+  segmentItem: {
+    borderRadius: 999,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.one + 1,
+  },
+  periodNav: { flexDirection: 'row', alignItems: 'center', flexShrink: 1 },
+  periodArrow: { padding: Spacing.one },
+  periodLabel: { flexShrink: 1, paddingHorizontal: Spacing.one },
   accountBtn: { marginRight: Spacing.two },
   avatar: { width: 28, height: 28, borderRadius: 14 },
   avatarFallback: {

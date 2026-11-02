@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
@@ -17,20 +17,32 @@ type Props = {
   spendByDay?: Map<string, number>;
   /** Block days after today. */
   maxToday?: boolean;
+  /** Month to open on when nothing is selected (defaults to today). */
+  initialDate?: number;
+  /** Shown under the month name for the month in view, e.g. its total spend. */
+  monthSummary?: (start: number, end: number) => ReactNode;
 };
 
 /** A compact, dependency-free month grid. Sunday-first. */
-export function MonthCalendar({ selected, onSelect, spendByDay, maxToday }: Props) {
+export function MonthCalendar({
+  selected,
+  onSelect,
+  spendByDay,
+  maxToday,
+  initialDate,
+  monthSummary,
+}: Props) {
   const theme = useTheme();
   const today = startOfDay();
   const cur = new Date(today);
 
   const [view, setView] = useState(() => {
-    const d = new Date(selected ?? today);
+    const d = new Date(selected ?? initialDate ?? today);
     return { year: d.getFullYear(), month: d.getMonth() };
   });
 
   const first = new Date(view.year, view.month, 1);
+  const next = new Date(view.year, view.month + 1, 1);
   const daysInMonth = new Date(view.year, view.month + 1, 0).getDate();
   const offset = first.getDay();
   const monthLabel = first.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
@@ -59,7 +71,10 @@ export function MonthCalendar({ selected, onSelect, spendByDay, maxToday }: Prop
         <Pressable onPress={() => shift(-1)} hitSlop={10} style={styles.nav}>
           <Ionicons name="chevron-back" size={18} color={theme.text} />
         </Pressable>
-        <ThemedText type="smallBold">{monthLabel}</ThemedText>
+        <View style={styles.title}>
+          <ThemedText type="smallBold">{monthLabel}</ThemedText>
+          {monthSummary?.(first.getTime(), next.getTime())}
+        </View>
         <Pressable
           onPress={() => canNext && shift(1)}
           disabled={!canNext}
@@ -136,6 +151,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.one,
   },
   nav: { padding: Spacing.one },
+  title: { alignItems: 'center' },
   row: { flexDirection: 'row' },
   weekday: { flex: 1, textAlign: 'center' },
   grid: { flexDirection: 'row', flexWrap: 'wrap' },

@@ -2,7 +2,18 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import { clearSharedPayloads, useIncomingShare } from 'expo-sharing';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import {
+  Alert,
+  Linking,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  TextInput,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GlassIconButton } from '@/components/glass-icon-button';
@@ -15,14 +26,26 @@ import { loadHandledSms, markSmsHandled, parseBankText, type BankTxn } from '@/l
 import { CATEGORIES, categoryOf, type CategoryKey } from '@/lib/expense-categories';
 import { formatMoney, fullDayLabel, monthKey, startOfDay, useExpenses } from '@/lib/expenses';
 import { goBack } from '@/lib/navigation';
+import {
+  IMPORT_RANGES,
+  importRange,
+  loadAutoImport,
+  setAutoImport,
+  smsInboxSupported,
+  subscribeAutoImport,
+  type AutoImportState,
+  type EnableResult,
+  type ImportRange,
+} from '@/lib/sms-auto-import';
 
 const GOOD = '#10B981';
 
 /**
  * Expenses ▸ Import from SMS. Bank alerts arrive by Share (Messages ▸ Share ▸
- * Goku — routed here by `+native-intent.ts`) or by pasting; no SMS permission
- * is involved. Debits become expenses with a guessed category, credits are
- * added to that month's "Money I have". Parsing happens on the phone.
+ * Goku — routed here by `+native-intent.ts`) or by pasting. Debits become
+ * expenses with a guessed category, credits are added to that month's "Money
+ * I have". Parsing happens on the phone. The switch at the top turns on
+ * hands-free import of debits from the inbox (`@/lib/sms-auto-import`).
  */
 export default function ImportSmsScreen() {
   const theme = useTheme();
@@ -132,6 +155,8 @@ export default function ImportSmsScreen() {
         contentContainerStyle={styles.body}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}>
+        {Platform.OS === 'android' && <AutoImportCard />}
+
         {Platform.OS === 'android' && (
           <GlassSurface style={styles.howCard}>
             <View style={[styles.howIcon, { backgroundColor: theme.accent + '1F' }]}>
@@ -298,6 +323,101 @@ export default function ImportSmsScreen() {
   );
 }
 
+/** On/off switch for reading bank debits straight from the SMS inbox. */
+function AutoImportCard() {
+  const theme = useTheme();
+  const [state, setState] = useState<AutoImportState | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    loadAutoImport().then(setState);
+    return subscribeAutoImport(setState);
+  }, []);
+
+  const toggle = (next: boolean) => act(() => setAutoImport(next));
+  const pickRange = (range: ImportRange) => act(() => importRange(range));
+
+  const act = async (fn: () => Promise<EnableResult>) => {
+    if (busy) return;
+    if (!smsInboxSupported) {
+      Alert.alert('Not available', 'Rebuild the app to read bank SMS automatically.');
+      return;
+    }
+    setBusy(true);
+    try {
+      const r = await fn();
+      if (r === 'blocked') {
+        Alert.alert(
+          'Allow SMS in settings',
+          'Android won’t ask again. Turn on SMS for Goku in the app’s system settings.',
+          [
+            { text: 'Not now', style: 'cancel' },
+            { text: 'Open settings', onPress: () => Linking.openSettings() },
+          ],
+        );
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const on = state?.enabled ?? false;
+  const status = !on
+    ? 'Add bank debits to Expenses as soon as the SMS arrives. Read on this phone only.'
+    : state?.lastRun
+      ? `On · checked ${new Date(state.lastRun).toLocaleTimeString('en-GB', {
+          hour: '2-digit',
+          minute: '2-digit',
+        })}${state.lastAdded ? ` · added ${state.lastAdded}` : ''}`
+      : 'On · checking your inbox…';
+
+  return (
+    <GlassSurface style={styles.autoCard}>
+      <View style={styles.autoRow}>
+        <View style={[styles.howIcon, { backgroundColor: theme.accent + '1F' }]}>
+          <Ionicons name="flash" size={18} color={theme.accent} />
+        </View>
+        <View style={styles.flex}>
+          <ThemedText type="smallBold">Auto-import bank debits</ThemedText>
+          <ThemedText type="small" themeColor="textSecondary">
+            {status}
+          </ThemedText>
+        </View>
+        <Switch
+          value={on}
+          onValueChange={toggle}
+          disabled={busy || state == null}
+          trackColor={{ true: theme.accent }}
+          accessibilityLabel="Auto-import bank debits from SMS"
+        />
+      </View>
+      <View style={[styles.rangeRow, { borderTopColor: theme.border }]}>
+        <ThemedText type="small" themeColor="textSecondary">
+          Import past debits
+        </ThemedText>
+        <View style={styles.rangeChips}>
+          {IMPORT_RANGES.map((r) => (
+            <Pressable
+              key={r.key}
+              onPress={() => pickRange(r.key)}
+              disabled={busy || state == null}
+              accessibilityRole="button"
+              accessibilityLabel={`Import bank debits from ${r.label.toLowerCase()}`}
+              style={({ pressed }) => [
+                styles.rangeChip,
+                { backgroundColor: theme.backgroundElement, opacity: pressed ? 0.7 : 1 },
+              ]}>
+              <ThemedText type="smallBold" style={{ color: theme.accent }}>
+                {r.label}
+              </ThemedText>
+            </Pressable>
+          ))}
+        </View>
+      </View>
+    </GlassSurface>
+  );
+}
+
 function Section({
   title,
   note,
@@ -409,6 +529,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.three,
     padding: Spacing.three,
+  },
+  autoCard: { padding: Spacing.three, gap: Spacing.three },
+  autoRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three },
+  rangeRow: {
+    gap: Spacing.two,
+    paddingTop: Spacing.three,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  rangeChips: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
+  rangeChip: {
+    borderRadius: 999,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.one + 2,
   },
   howIcon: {
     width: 36,

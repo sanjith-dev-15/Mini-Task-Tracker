@@ -3,4 +3,6 @@
   <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
   <!-- Ask to be exempt from battery optimisation so geofence events aren't dropped. -->
   <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+  <!-- Arrival alarm: repeating vibration until the card is answered. -->
+  <uses-permission android:name="android.permission.VIBRATE" />
 </manifest>

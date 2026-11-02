@@ -2,11 +2,13 @@ import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
 import { router } from 'expo-router';
 import { DrawerToggleButton } from 'expo-router/drawer';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { getInstalledVersion } from '../../../modules/app-updater';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { requestUpdateCheck } from '@/components/update-prompt';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemeContext } from '@/lib/theme';
@@ -24,6 +26,7 @@ export default function SettingsIndex() {
 
   const appName = Constants.expoConfig?.name ?? 'App';
   const version = Constants.expoConfig?.version ?? '1.0.0';
+  const installed = getInstalledVersion();
 
   return (
     <ThemedView style={styles.screen}>
@@ -63,8 +66,18 @@ export default function SettingsIndex() {
               { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.border },
             ]}>
             <ThemedText style={styles.flex}>Version</ThemedText>
-            <ThemedText themeColor="textSecondary">{version}</ThemedText>
+            <ThemedText themeColor="textSecondary">
+              {installed ? `${version} (build ${installed.versionCode})` : version}
+            </ThemedText>
           </View>
+          {Platform.OS === 'android' && (
+            <NavRow
+              icon="cloud-download-outline"
+              label="Check for updates"
+              onPress={requestUpdateCheck}
+              divider
+            />
+          )}
         </View>
       </ScrollView>
     </ThemedView>
