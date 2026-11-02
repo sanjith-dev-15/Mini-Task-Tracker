@@ -3,9 +3,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { CategoryKey } from '@/lib/expense-categories';
 
 /**
- * Turns Indian bank / UPI alert SMS — shared into the app or pasted — into
- * transactions for Expenses ▸ Import from SMS. Runs entirely on the device
- * (no SMS permission); only the parsed fields are kept.
+ * Turns Indian bank / UPI alert SMS — shared into the app, pasted, or read
+ * from the inbox by `@/lib/sms-auto-import` — into transactions for Expenses.
+ * Runs entirely on the device; only the parsed fields are kept.
  */
 export type BankTxn = {
   /** Hash of the message text — used to skip re-imports. */

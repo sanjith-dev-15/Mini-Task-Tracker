@@ -293,6 +293,72 @@ export function daysElapsedThisMonth(): number {
   return new Date().getDate();
 }
 
+/* ---------------------------------------------------------- week / month */
+
+export type Period = 'week' | 'month';
+
+/** `[start, end)` in epoch ms. */
+export type PeriodRange = { start: number; end: number };
+
+/** The week (Sunday-first, like the calendar) or month containing `anchor`. */
+export function periodRange(period: Period, anchor: number): PeriodRange {
+  const d = new Date(startOfDay(anchor));
+  if (period === 'month') {
+    return {
+      start: new Date(d.getFullYear(), d.getMonth(), 1).getTime(),
+      end: new Date(d.getFullYear(), d.getMonth() + 1, 1).getTime(),
+    };
+  }
+  const start = new Date(d.getFullYear(), d.getMonth(), d.getDate() - d.getDay());
+  const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 7);
+  return { start: start.getTime(), end: end.getTime() };
+}
+
+/** `anchor` moved by `delta` weeks / months. */
+export function shiftPeriod(period: Period, anchor: number, delta: number): number {
+  const d = new Date(startOfDay(anchor));
+  return period === 'month'
+    ? new Date(d.getFullYear(), d.getMonth() + delta, 1).getTime()
+    : new Date(d.getFullYear(), d.getMonth(), d.getDate() + 7 * delta).getTime();
+}
+
+export function inRange(list: Expense[], r: PeriodRange): Expense[] {
+  return list.filter((e) => e.spentAt >= r.start && e.spentAt < r.end);
+}
+
+/** Whether today falls inside `r`. */
+export function isCurrentRange(r: PeriodRange): boolean {
+  const now = Date.now();
+  return now >= r.start && now < r.end;
+}
+
+/** Days of `r` up to today — what a ₹/day average should divide by. */
+export function daysElapsedIn(r: PeriodRange): number {
+  const until = Math.min(r.end, startOfDay() + DAY_MS);
+  return Math.max(1, Math.round((until - r.start) / DAY_MS));
+}
+
+/** "November" / "November 2025" / "26 Oct – 1 Nov". */
+export function periodLabel(period: Period, r: PeriodRange): string {
+  const start = new Date(r.start);
+  const thisYear = start.getFullYear() === new Date().getFullYear();
+  if (period === 'month') {
+    return start.toLocaleDateString('en-GB', {
+      month: 'long',
+      ...(thisYear ? {} : { year: 'numeric' }),
+    });
+  }
+  const last = new Date(r.end - DAY_MS / 2);
+  const sameMonth = start.getMonth() === last.getMonth();
+  const a = start.toLocaleDateString('en-GB', sameMonth ? { day: 'numeric' } : { day: 'numeric', month: 'short' });
+  const b = last.toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    ...(thisYear ? {} : { year: 'numeric' }),
+  });
+  return `${a} – ${b}`;
+}
+
 export function sumAmount(list: Expense[]): number {
   return list.reduce((acc, e) => acc + e.amount, 0);
 }

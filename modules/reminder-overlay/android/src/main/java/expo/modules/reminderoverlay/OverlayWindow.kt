@@ -49,7 +49,11 @@ internal object OverlayWindow {
 
   private val main = Handler(Looper.getMainLooper())
   private val queue = ArrayDeque<Entry>()
-  private var current: Entry? = null
+  @Volatile private var current: Entry? = null
+
+  /** A card is on screen right now. */
+  val isShowing: Boolean
+    get() = current != null
   private var view: View? = null
   private var appContext: Context? = null
 
@@ -109,6 +113,8 @@ internal object OverlayWindow {
       wm.addView(v, params)
       current = entry
       view = v
+      // Ring until the user responds to this card.
+      ArrivalAlarm.start(ctx)
     } catch (_: Exception) {
       // Permission revoked between the check and now, or the window was rejected.
       current = null
@@ -121,6 +127,7 @@ internal object OverlayWindow {
     val v = view
     current = null
     view = null
+    ArrivalAlarm.stop()
     if (ctx != null && v != null) {
       try {
         (ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager).removeView(v)
@@ -212,6 +219,11 @@ internal object OverlayWindow {
     val root = object : FrameLayout(ctx) {
       override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (event.keyCode == KeyEvent.KEYCODE_BACK) return true
+        // Volume keys silence the alarm (like a ringing phone); the card stays.
+        if (event.keyCode == KeyEvent.KEYCODE_VOLUME_UP || event.keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+          if (event.action == KeyEvent.ACTION_DOWN) ArrivalAlarm.stop()
+          return true
+        }
         return super.dispatchKeyEvent(event)
       }
     }

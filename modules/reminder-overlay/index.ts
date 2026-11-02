@@ -20,6 +20,8 @@ declare class ReminderOverlayNative extends NativeModule<Events> {
   ): boolean;
   hide(id: string): void;
   takeDone(): string[];
+  startAlarm(): void;
+  stopAlarm(force: boolean): void;
 }
 
 /** null on iOS / web, or on a build made before this module was added. */
@@ -75,6 +77,27 @@ export function showOverlay(c: OverlayContent): boolean {
 
 export function hideOverlay(id: string) {
   native?.hide(id);
+}
+
+/**
+ * Ring (alarm sound on loop) and vibrate until stopped or 2 minutes pass.
+ * The overlay card starts this itself; call it for arrivals without a card.
+ */
+export function startAlarm() {
+  try {
+    native?.startAlarm();
+  } catch {
+    // old build
+  }
+}
+
+/** Silence the alarm. Without `force`, it keeps ringing while an overlay card is up. */
+export function stopAlarm(force = false) {
+  try {
+    native?.stopAlarm(force);
+  } catch {
+    // old build
+  }
 }
 
 /** Reminder ids the user marked done from the overlay; clears the list. */

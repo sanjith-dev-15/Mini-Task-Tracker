@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams, useNavigation } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -16,9 +16,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GlassAlert } from '@/components/glass-alert';
 import { GlassIconButton } from '@/components/glass-icon-button';
-import { MonthCalendar } from '@/components/month-calendar';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { WhenPicker } from '@/components/when-picker';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import {
@@ -29,7 +29,6 @@ import {
   radiusLabel,
 } from '@/lib/geofencing';
 import { resolveSharedLocation } from '@/lib/maps-link';
-import { activeChipKey, dayStartOf, DUE_CHIPS, formatDue, morningOf } from '@/lib/reminder-dates';
 import { isBlankReminder, useReminders, type Reminder } from '@/lib/reminders';
 
 export default function ReminderEditorScreen() {
@@ -48,16 +47,39 @@ export default function ReminderEditorScreen() {
   // Discard on exit if the user never gave it anything worth keeping. A
   // just-created reminder (opened with `fresh`) needs a title or notes to
   // survive — a bare location picked on the map but never named doesn't count.
-  useEffect(() => {
-    return () => {
-      const current = ref.current;
-      if (!current) return;
-      const discard = isNew
-        ? !current.title.trim() && !current.notes.trim()
-        : isBlankReminder(current);
-      if (discard) deleteReminder(current.id);
-    };
+  const discardIfEmpty = useCallback(() => {
+    const current = ref.current;
+    if (!current) return;
+    const discard = isNew
+      ? !current.title.trim() && !current.notes.trim()
+      : isBlankReminder(current);
+    if (discard) deleteReminder(current.id);
   }, [deleteReminder, isNew]);
+
+  // Effect cleanups also run when an effect re-subscribes (e.g. a hot reload)
+  // while the editor is still on screen — only discard once it's really left.
+  const navigation = useNavigation();
+  const discardIfLeft = useCallback(() => {
+    if (!navigation.isFocused()) discardIfEmpty();
+  }, [navigation, discardIfEmpty]);
+
+  useEffect(() => discardIfLeft, [discardIfLeft]);
+
+  // The drawer keeps this screen mounted after you leave it, so also check on
+  // blur — except for trips that come back here (map picker, settings).
+  const keepOnBlur = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      keepOnBlur.current = false;
+      return () => {
+        if (!keepOnBlur.current) discardIfLeft();
+      };
+    }, [discardIfLeft]),
+  );
+  const pickOnMap = () => {
+    keepOnBlur.current = true;
+    router.push({ pathname: '/map', params: { pickFor: id } });
+  };
 
   // Whether "location reminders" is actually armed (toggle on + all perms).
   const [geoActive, setGeoActive] = useState(false);
@@ -74,7 +96,8 @@ export default function ReminderEditorScreen() {
   );
 
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const [showCal, setShowCal] = useState(false);
+  const [titleMissing, setTitleMissing] = useState(false);
+  const titleRef = useRef<TextInput>(null);
 
   const [linkOpen, setLinkOpen] = useState(false);
   const [linkText, setLinkText] = useState('');
@@ -124,8 +147,18 @@ export default function ReminderEditorScreen() {
     );
   }
 
-  const currentChip = activeChipKey(reminder.dueAt);
   const loc = reminder.location;
+
+  // Edits save as you type; this confirms the reminder has a title and leaves.
+  const setReminder = () => {
+    if (!reminder.title.trim()) {
+      setTitleMissing(true);
+      titleRef.current?.focus();
+      return;
+    }
+    Keyboard.dismiss();
+    goHome();
+  };
 
   return (
     <ThemedView style={styles.screen}>
@@ -172,15 +205,48 @@ export default function ReminderEditorScreen() {
           style={styles.flex}
           contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + Spacing.six }]}
           keyboardShouldPersistTaps="handled">
-          <TextInput
-            value={reminder.title}
-            onChangeText={(title) => updateReminder(reminder.id, { title })}
-            placeholder="Remind me to…"
-            placeholderTextColor={theme.textSecondary}
-            style={[styles.titleInput, { color: theme.text }]}
-            multiline
-          />
+          <View style={styles.hero}>
+            <View style={styles.bellWrap}>
+              <Ionicons name="notifications" size={40} color={theme.accent} />
+              <View style={[styles.wave, styles.waveL, { backgroundColor: theme.accent }]} />
+              <View style={[styles.wave, styles.waveR, { borderColor: theme.accent }]} />
+            </View>
+            <View style={styles.heroText}>
+              <ThemedText style={styles.heroTitle}>Remind me to…</ThemedText>
+              <ThemedText themeColor="textSecondary">Set a reminder for anything ✨</ThemedText>
+            </View>
+          </View>
 
+          <View
+            style={[
+              styles.field,
+              {
+                backgroundColor: theme.backgroundElement,
+                borderColor: titleMissing ? theme.danger : theme.border,
+              },
+            ]}>
+            <Ionicons name="create-outline" size={20} color={theme.textSecondary} />
+            <TextInput
+              ref={titleRef}
+              value={reminder.title}
+              onChangeText={(title) => {
+                updateReminder(reminder.id, { title });
+                if (title.trim()) setTitleMissing(false);
+              }}
+              placeholder="e.g. Drink water, Finish project…"
+              placeholderTextColor={theme.textSecondary}
+              style={[styles.titleInput, { color: theme.text }]}
+              autoFocus={isNew}
+              multiline
+            />
+          </View>
+          {titleMissing && (
+            <ThemedText type="small" style={[styles.fieldError, { color: theme.danger }]}>
+              Add what you want to be reminded about.
+            </ThemedText>
+          )}
+
+          {!isNew && (
           <Pressable
             onPress={() => updateReminder(reminder.id, { done: !reminder.done })}
             style={styles.doneRow}>
@@ -198,80 +264,22 @@ export default function ReminderEditorScreen() {
               {reminder.done ? 'Completed' : 'Mark complete'}
             </ThemedText>
           </Pressable>
-
-          <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
-            WHEN
-          </ThemedText>
-          <View style={styles.chips}>
-            {DUE_CHIPS.map((chip) => {
-              const active = currentChip === chip.key;
-              return (
-                <Pressable
-                  key={chip.key}
-                  onPress={() => {
-                    setShowCal(false);
-                    updateReminder(reminder.id, { dueAt: chip.resolve() });
-                  }}
-                  style={[
-                    styles.chip,
-                    {
-                      backgroundColor: active ? theme.accent : theme.backgroundElement,
-                      borderColor: active ? theme.accent : theme.border,
-                    },
-                  ]}>
-                  <ThemedText
-                    type="smallBold"
-                    style={{ color: active ? '#fff' : theme.textSecondary }}>
-                    {chip.label}
-                  </ThemedText>
-                </Pressable>
-              );
-            })}
-
-            {(() => {
-              const custom = reminder.dueAt != null && currentChip === '';
-              const active = custom || showCal;
-              return (
-                <Pressable
-                  onPress={() => setShowCal((v) => !v)}
-                  style={[
-                    styles.chip,
-                    styles.dateChip,
-                    {
-                      backgroundColor: active ? theme.accent : theme.backgroundElement,
-                      borderColor: active ? theme.accent : theme.border,
-                    },
-                  ]}>
-                  <Ionicons
-                    name="calendar-outline"
-                    size={13}
-                    color={active ? '#fff' : theme.textSecondary}
-                  />
-                  <ThemedText
-                    type="smallBold"
-                    style={{ color: active ? '#fff' : theme.textSecondary }}>
-                    {custom ? formatDue(reminder.dueAt!) : 'Pick a date'}
-                  </ThemedText>
-                </Pressable>
-              );
-            })()}
-          </View>
-
-          {showCal && (
-            <View style={[styles.calendar, { backgroundColor: theme.backgroundElement }]}>
-              <MonthCalendar
-                selected={reminder.dueAt != null ? dayStartOf(reminder.dueAt) : null}
-                onSelect={(ts) => {
-                  updateReminder(reminder.id, { dueAt: morningOf(ts) });
-                  setShowCal(false);
-                }}
-              />
-            </View>
           )}
 
-          <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
-            LOCATION
-          </ThemedText>
+          <WhenPicker
+            dueAt={reminder.dueAt}
+            onChange={(dueAt) => updateReminder(reminder.id, { dueAt })}
+          />
+
+          <View style={styles.whenHead}>
+            <Ionicons name="location-outline" size={16} color={theme.textSecondary} />
+            <ThemedText type="smallBold" themeColor="textSecondary">
+              Location{' '}
+              <ThemedText type="small" themeColor="textSecondary">
+                (Optional)
+              </ThemedText>
+            </ThemedText>
+          </View>
 
           {loc ? (
             <View
@@ -298,9 +306,7 @@ export default function ReminderEditorScreen() {
               </View>
               <View style={[styles.locCardActions, { borderTopColor: theme.border }]}>
                 <Pressable
-                  onPress={() =>
-                    router.push({ pathname: '/map', params: { pickFor: reminder.id } })
-                  }
+                  onPress={pickOnMap}
                   style={({ pressed }) => [
                     styles.locCardAction,
                     pressed && { backgroundColor: theme.backgroundSelected },
@@ -334,9 +340,7 @@ export default function ReminderEditorScreen() {
           ) : (
             <View style={styles.locGrid}>
               <Pressable
-                onPress={() =>
-                  router.push({ pathname: '/map', params: { pickFor: reminder.id } })
-                }
+                onPress={pickOnMap}
                 accessibilityRole="button"
                 accessibilityLabel="Pick a location on the map"
                 style={({ pressed }) => [
@@ -347,13 +351,16 @@ export default function ReminderEditorScreen() {
                     opacity: pressed ? 0.7 : 1,
                   },
                 ]}>
-                <View style={[styles.locDisc, { backgroundColor: theme.accent + '1F' }]}>
-                  <Ionicons name="location-outline" size={20} color={theme.accent} />
+                <Ionicons name="location" size={22} color={theme.accent} />
+                <View style={styles.flex}>
+                  <ThemedText type="smallBold" numberOfLines={1}>
+                    Pick on map
+                  </ThemedText>
+                  <ThemedText themeColor="textSecondary" numberOfLines={2} style={styles.locOptionSub}>
+                    Search or drop a pin
+                  </ThemedText>
                 </View>
-                <ThemedText type="smallBold">Pick on map</ThemedText>
-                <ThemedText type="small" themeColor="textSecondary" style={styles.locOptionSub}>
-                  Search or drop a pin
-                </ThemedText>
+                <Ionicons name="chevron-forward" size={16} color={theme.textSecondary} />
               </Pressable>
 
               <Pressable
@@ -371,13 +378,20 @@ export default function ReminderEditorScreen() {
                     opacity: pressed ? 0.7 : 1,
                   },
                 ]}>
-                <View style={[styles.locDisc, { backgroundColor: theme.accent + '1F' }]}>
-                  <Ionicons name="link" size={20} color={theme.accent} />
+                <Ionicons name="link" size={22} color={theme.accent} />
+                <View style={styles.flex}>
+                  <ThemedText type="smallBold" numberOfLines={1}>
+                    Paste link
+                  </ThemedText>
+                  <ThemedText themeColor="textSecondary" numberOfLines={2} style={styles.locOptionSub}>
+                    From Google Maps
+                  </ThemedText>
                 </View>
-                <ThemedText type="smallBold">Paste link</ThemedText>
-                <ThemedText type="small" themeColor="textSecondary" style={styles.locOptionSub}>
-                  From Google Maps
-                </ThemedText>
+                <Ionicons
+                  name={linkOpen ? 'chevron-down' : 'chevron-forward'}
+                  size={16}
+                  color={theme.textSecondary}
+                />
               </Pressable>
             </View>
           )}
@@ -494,7 +508,10 @@ export default function ReminderEditorScreen() {
                 })}
               </View>
               <Pressable
-                onPress={() => router.push('/settings/permissions')}
+                onPress={() => {
+                  keepOnBlur.current = true;
+                  router.push('/settings/permissions');
+                }}
                 style={styles.geoHint}>
                 <Ionicons
                   name={geoActive ? 'notifications' : 'notifications-off-outline'}
@@ -510,17 +527,44 @@ export default function ReminderEditorScreen() {
             </>
           )}
 
-          <View style={[styles.divider, { backgroundColor: theme.border }]} />
-
+          <View style={styles.whenHead}>
+            <Ionicons name="document-text-outline" size={16} color={theme.textSecondary} />
+            <ThemedText type="smallBold" themeColor="textSecondary">
+              Notes{' '}
+              <ThemedText type="small" themeColor="textSecondary">
+                (Optional)
+              </ThemedText>
+            </ThemedText>
+          </View>
           <TextInput
             value={reminder.notes}
             onChangeText={(notes) => updateReminder(reminder.id, { notes })}
-            placeholder="Notes…"
+            placeholder="Add any extra details…"
             placeholderTextColor={theme.textSecondary}
-            style={[styles.notesInput, { color: theme.text }]}
+            style={[
+              styles.notesInput,
+              {
+                color: theme.text,
+                backgroundColor: theme.backgroundElement,
+                borderColor: theme.border,
+              },
+            ]}
             multiline
             textAlignVertical="top"
           />
+
+          <Pressable
+            accessibilityRole="button"
+            onPress={setReminder}
+            style={({ pressed }) => [
+              styles.setBtn,
+              { opacity: pressed ? 0.85 : 1, transform: [{ scale: pressed ? 0.98 : 1 }] },
+            ]}>
+            <Ionicons name="notifications-outline" size={20} color="#fff" />
+            <ThemedText style={styles.setLabel}>
+              {isNew ? 'Set Reminder' : 'Save Reminder'}
+            </ThemedText>
+          </Pressable>
         </ScrollView>
       </KeyboardAvoidingView>
     </ThemedView>
@@ -545,7 +589,39 @@ const styles = StyleSheet.create({
     maxWidth: MaxContentWidth,
     alignSelf: 'center',
   },
-  titleInput: { fontSize: 26, fontWeight: '700', paddingVertical: Spacing.two },
+  hero: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.three,
+    paddingTop: Spacing.two,
+    paddingBottom: Spacing.four,
+  },
+  heroText: { flex: 1, gap: 2 },
+  bellWrap: { width: 60, height: 48, justifyContent: 'center', paddingLeft: 8 },
+  wave: { position: 'absolute' },
+  waveL: { left: 0, top: 12, width: 4, height: 9, borderRadius: 2, transform: [{ rotate: '-35deg' }] },
+  waveR: {
+    right: 2,
+    top: 2,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 2.5,
+    borderLeftColor: 'transparent',
+    borderBottomColor: 'transparent',
+  },
+  heroTitle: { fontSize: 28, lineHeight: 34, fontWeight: '800' },
+  field: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.three,
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: Spacing.three,
+    minHeight: 60,
+  },
+  titleInput: { flex: 1, fontSize: 16, paddingVertical: Spacing.three },
+  fieldError: { marginTop: Spacing.one, paddingHorizontal: Spacing.one },
   doneRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -568,11 +644,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.one + 2,
   },
-  dateChip: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one },
-  calendar: {
-    borderRadius: 14,
-    padding: Spacing.three,
-    marginTop: Spacing.two,
+
+  // Icon + label section heading (Notes)
+  whenHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.one + 2,
+    marginTop: Spacing.four,
+    marginBottom: Spacing.two,
   },
   locDisc: {
     width: 40,
@@ -582,18 +661,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
 
-  // no-location: two side-by-side method cards
+  // no-location: two compact side-by-side rows (icon · text · chevron)
   locGrid: { flexDirection: 'row', gap: Spacing.two },
   locOption: {
     flex: 1,
+    flexDirection: 'row',
     alignItems: 'center',
-    gap: 2,
-    borderRadius: 14,
+    gap: Spacing.two,
+    borderRadius: 16,
     borderWidth: StyleSheet.hairlineWidth,
-    paddingVertical: Spacing.three,
-    paddingHorizontal: Spacing.two,
+    paddingVertical: Spacing.two + 4,
+    paddingLeft: Spacing.three,
+    paddingRight: Spacing.two,
   },
-  locOptionSub: { textAlign: 'center' },
+  locOptionSub: { fontSize: 12, lineHeight: 16 },
 
   // has-location: detail card with an action bar
   locCard: {
@@ -661,6 +742,25 @@ const styles = StyleSheet.create({
     marginTop: Spacing.two,
     paddingHorizontal: Spacing.one,
   },
-  divider: { height: StyleSheet.hairlineWidth, marginVertical: Spacing.four },
-  notesInput: { fontSize: 16, lineHeight: 24, minHeight: 120 },
+  notesInput: {
+    fontSize: 16,
+    lineHeight: 24,
+    minHeight: 96,
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.three,
+  },
+  setBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.two,
+    height: 58,
+    borderRadius: 999,
+    marginTop: Spacing.five,
+    backgroundColor: '#3C87F7',
+    experimental_backgroundImage: 'linear-gradient(90deg, #6AA8FA 0%, #2F6FE6 100%)',
+  },
+  setLabel: { color: '#fff', fontSize: 17, fontWeight: '700' },
 });

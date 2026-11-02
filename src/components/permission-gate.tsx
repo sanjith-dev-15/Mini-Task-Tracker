@@ -21,6 +21,7 @@ import {
   applicableRuntimeKeys,
   askPermission,
   isSettingsScreenPermission,
+  OPT_IN_KEYS,
   PERMISSIONS,
   readPermission,
   type PermResult,
@@ -33,9 +34,11 @@ const REASK_AFTER_MS = 30_000;
 
 type Statuses = Partial<Record<RuntimeKey, PermResult>>;
 
+const gateKeys = () => applicableRuntimeKeys().filter((k) => !OPT_IN_KEYS.includes(k));
+
 async function readAll(): Promise<Statuses> {
   const entries = await Promise.all(
-    applicableRuntimeKeys().map(async (k) => [k, await readPermission(k)] as const),
+    gateKeys().map(async (k) => [k, await readPermission(k)] as const),
   );
   return Object.fromEntries(entries);
 }
@@ -58,7 +61,7 @@ export function PermissionGate({ ready }: { ready: boolean }) {
   const [busy, setBusy] = useState<RuntimeKey | null>(null);
   const backgroundedAt = useRef<number | null>(null);
 
-  const keys = applicableRuntimeKeys();
+  const keys = gateKeys();
 
   const refresh = useCallback(() => {
     readAll()

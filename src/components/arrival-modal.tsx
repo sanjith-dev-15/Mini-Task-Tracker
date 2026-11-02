@@ -18,6 +18,7 @@ import {
   hideOverlay,
   overlaySupported,
   showOverlay,
+  stopAlarm,
   takeOverlayDone,
 } from '../../modules/reminder-overlay';
 
@@ -69,7 +70,11 @@ export function ArrivalModal() {
     const loadPending = () => pendingArrivals().then(enqueue);
     loadPending();
     const appState = AppState.addEventListener('change', (s) => {
-      if (s === 'active') loadPending();
+      if (s !== 'active') return;
+      // Opening the app counts as noticing a card-less alarm. One with a card
+      // on screen keeps ringing until the card is answered.
+      stopAlarm();
+      loadPending();
     });
     const received = Notifications.addNotificationReceivedListener((n) => {
       const id = reminderIdOf(n);
@@ -78,6 +83,7 @@ export function ArrivalModal() {
     const tapped = Notifications.addNotificationResponseReceivedListener((r) => {
       const id = reminderIdOf(r.notification);
       if (!id) return;
+      stopAlarm(true);
       if (shownAsOverlay(r.notification)) {
         // The card is (or was) already on screen — go straight to the reminder.
         hideOverlay(id);

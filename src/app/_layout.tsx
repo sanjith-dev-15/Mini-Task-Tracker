@@ -17,6 +17,7 @@ import { AnimatedSplash } from '@/components/animated-splash';
 import { ArrivalModal } from '@/components/arrival-modal';
 import { GlassNav } from '@/components/glass-nav';
 import { PermissionGate } from '@/components/permission-gate';
+import { UpdatePrompt } from '@/components/update-prompt';
 import { Spacing } from '@/constants/theme';
 import { AuthProvider } from '@/lib/auth';
 import { ExpensesProvider } from '@/lib/expenses';
@@ -24,6 +25,7 @@ import { ExpensesProvider } from '@/lib/expenses';
 import { syncGeofences } from '@/lib/geofencing';
 import { NotesProvider } from '@/lib/notes';
 import { RemindersProvider, useReminders } from '@/lib/reminders';
+import { useBankSmsAutoImport } from '@/lib/sms-auto-import';
 import { ThemeProvider, useThemeContext } from '@/lib/theme';
 
 // Keep the native splash up until <AnimatedSplash> takes over.
@@ -52,8 +54,10 @@ export default function RootLayout() {
               <RemindersProvider>
                 <ExpensesProvider>
                   <GeofenceSync />
+                  <BankSmsSync />
                   <ThemedRoot />
                   <PermissionGate ready={splashDone} />
+                  <UpdatePrompt ready={splashDone} />
                 </ExpensesProvider>
               </RemindersProvider>
             </NotesProvider>
@@ -71,6 +75,12 @@ function GeofenceSync() {
   useEffect(() => {
     syncGeofences(reminders).catch(() => {});
   }, [reminders]);
+  return null;
+}
+
+/** Adds bank debit SMS to Expenses as they arrive (when turned on in Import from SMS). */
+function BankSmsSync() {
+  useBankSmsAutoImport();
   return null;
 }
 

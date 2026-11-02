@@ -73,6 +73,16 @@ class ReminderOverlayModule : Module() {
       OverlayWindow.dismiss(id)
     }
 
+    /** Ring + vibrate (for arrivals that couldn't show the card). */
+    Function("startAlarm") {
+      ArrivalAlarm.start(context)
+    }
+
+    /** Silence the alarm. Without `force`, leaves it ringing while a card is up. */
+    Function("stopAlarm") { force: Boolean ->
+      if (force || !OverlayWindow.isShowing) ArrivalAlarm.stop()
+    }
+
     /** Reminder ids marked done from the overlay since the last call (then cleared). */
     Function("takeDone") {
       OverlayWindow.takeDone(context)

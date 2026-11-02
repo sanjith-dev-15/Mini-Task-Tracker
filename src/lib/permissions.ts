@@ -1,8 +1,9 @@
 import type { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
-import { Platform } from 'react-native';
+import { PermissionsAndroid, Platform } from 'react-native';
 
+import { smsInboxSupported } from '../../modules/bank-sms';
 import {
   canDrawOverlays,
   isIgnoringBatteryOptimizations,
@@ -116,6 +117,17 @@ export const PERMISSIONS: PermissionInfo[] = [
       'Battery optimisation can stop the app from hearing that you arrived. Geofencing is low-power, so this costs very little battery.',
     grant: 'runtime',
   },
+  {
+    key: 'sms',
+    title: 'SMS',
+    icon: 'chatbox-ellipses-outline',
+    android: ['READ_SMS'],
+    purpose: 'Add bank debit alerts to Expenses automatically.',
+    detail:
+      'Only used if you turn on auto-import in Expenses ▸ Import from SMS. Messages are read and parsed on this phone; only the amount, payee and date of bank alerts are kept. Personal messages are skipped.',
+    grant: 'runtime',
+    optional: true,
+  },
 ];
 
 /* ------------------------------------------------ runtime permission status */
@@ -130,8 +142,12 @@ export const RUNTIME_KEYS = [
   'notifications',
   'overlay',
   'battery',
+  'sms',
 ] as const;
 export type RuntimeKey = (typeof RUNTIME_KEYS)[number];
+
+/** Asked for only when the user turns the feature on — never by the startup gate. */
+export const OPT_IN_KEYS: readonly string[] = ['sms'];
 
 /** Android-only special permissions granted from a system settings screen. */
 const SETTINGS_SCREEN_KEYS: readonly string[] = ['overlay', 'battery'];
@@ -163,6 +179,11 @@ export async function readPermission(key: string): Promise<PermResult> {
     if (isSettingsScreenPermission(key)) {
       if (!overlaySupported) return { status: 'unavailable', canAsk: false };
       const granted = key === 'overlay' ? canDrawOverlays() : isIgnoringBatteryOptimizations();
+      return toResult(granted, true);
+    }
+    if (key === 'sms') {
+      if (!smsInboxSupported) return { status: 'unavailable', canAsk: false };
+      const granted = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.READ_SMS);
       return toResult(granted, true);
     }
   } catch {
@@ -202,6 +223,14 @@ export async function askPermission(key: string): Promise<PermResult> {
       requestIgnoreBatteryOptimizations();
       return readPermission(key);
     }
+    if (key === 'sms') {
+      if (!smsInboxSupported) return { status: 'unavailable', canAsk: false };
+      const r = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.READ_SMS);
+      return toResult(
+        r === PermissionsAndroid.RESULTS.GRANTED,
+        r !== PermissionsAndroid.RESULTS.NEVER_ASK_AGAIN,
+      );
+    }
   } catch {
     /* native module or manifest entry missing */
   }
@@ -211,7 +240,7 @@ export async function askPermission(key: string): Promise<PermResult> {
 /** Runtime permissions that apply on this platform / build. */
 export function applicableRuntimeKeys(): RuntimeKey[] {
   return RUNTIME_KEYS.filter(
-    (k) => Platform.OS === 'android' || !isSettingsScreenPermission(k),
+    (k) => Platform.OS === 'android' || (!isSettingsScreenPermission(k) && k !== 'sms'),
   );
 }
 
