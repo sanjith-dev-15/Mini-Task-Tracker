@@ -78,7 +78,15 @@ export function formatDue(ts: number): string {
   });
 }
 
-/** Past due and not yet done. */
+/** When a new reminder is for, until the user picks otherwise: today. */
+export function defaultDueAt(): number {
+  return atMorning(0);
+}
+
+/**
+ * Past due and not yet done. Reminders only carry a day (always stored as
+ * 9am), so one is overdue once its day has passed — not at 9am that day.
+ */
 export function isOverdue(dueAt: number | null, done: boolean): boolean {
-  return dueAt != null && !done && dueAt < Date.now();
+  return dueAt != null && !done && dayStartOf(dueAt) < startOfToday().getTime();
 }

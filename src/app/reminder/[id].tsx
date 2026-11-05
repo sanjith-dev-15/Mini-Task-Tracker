@@ -16,6 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GlassAlert } from '@/components/glass-alert';
 import { GlassIconButton } from '@/components/glass-icon-button';
+import { RangePicker } from '@/components/range-picker';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { WhenPicker } from '@/components/when-picker';
@@ -25,8 +26,6 @@ import {
   DEFAULT_RADIUS,
   geofencePermissionState,
   isGeofencingEnabled,
-  RADIUS_OPTIONS,
-  radiusLabel,
 } from '@/lib/geofencing';
 import { resolveSharedLocation } from '@/lib/maps-link';
 import { isBlankReminder, useReminders, type Reminder } from '@/lib/reminders';
@@ -97,7 +96,20 @@ export default function ReminderEditorScreen() {
 
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [titleMissing, setTitleMissing] = useState(false);
+  const [locationRequired, setLocationRequired] = useState(false);
+  const scrollRef = useRef<ScrollView>(null);
+  const locationY = useRef(0);
   const titleRef = useRef<TextInput>(null);
+
+  // Alert range picked before there's a place to attach it to; applied once
+  // a location is set (map picker or pasted link).
+  const [pendingRadius, setPendingRadius] = useState<number>(DEFAULT_RADIUS);
+  const located = reminder?.location;
+  useEffect(() => {
+    if (reminder && located && located.radius == null && pendingRadius !== DEFAULT_RADIUS) {
+      updateReminder(reminder.id, { location: { ...located, radius: pendingRadius } });
+    }
+  }, [reminder, located, pendingRadius, updateReminder]);
 
   const [linkOpen, setLinkOpen] = useState(false);
   const [linkText, setLinkText] = useState('');
@@ -124,7 +136,7 @@ export default function ReminderEditorScreen() {
           lat: found.lat,
           lng: found.lng,
           label: found.label ?? reminder.location?.label,
-          radius: reminder.location?.radius,
+          radius: reminder.location?.radius ?? pendingRadius,
         },
       });
       setLinkText('');
@@ -148,12 +160,21 @@ export default function ReminderEditorScreen() {
   }
 
   const loc = reminder.location;
+  const locationMissing = locationRequired && !loc;
 
-  // Edits save as you type; this confirms the reminder has a title and leaves.
+  // Edits save as you type; this checks the two things every reminder needs —
+  // what (title) and where (location) — then leaves.
   const setReminder = () => {
-    if (!reminder.title.trim()) {
-      setTitleMissing(true);
+    const noTitle = !reminder.title.trim();
+    setTitleMissing(noTitle);
+    setLocationRequired(!loc);
+    if (noTitle) {
       titleRef.current?.focus();
+      return;
+    }
+    if (!loc) {
+      Keyboard.dismiss();
+      scrollRef.current?.scrollTo({ y: Math.max(0, locationY.current - Spacing.four), animated: true });
       return;
     }
     Keyboard.dismiss();
@@ -202,6 +223,7 @@ export default function ReminderEditorScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={insets.top + 44}>
         <ScrollView
+          ref={scrollRef}
           style={styles.flex}
           contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + Spacing.six }]}
           keyboardShouldPersistTaps="handled">
@@ -271,13 +293,14 @@ export default function ReminderEditorScreen() {
             onChange={(dueAt) => updateReminder(reminder.id, { dueAt })}
           />
 
-          <View style={styles.whenHead}>
+          <View
+            style={styles.whenHead}
+            onLayout={(e) => {
+              locationY.current = e.nativeEvent.layout.y;
+            }}>
             <Ionicons name="location-outline" size={16} color={theme.textSecondary} />
             <ThemedText type="smallBold" themeColor="textSecondary">
-              Location{' '}
-              <ThemedText type="small" themeColor="textSecondary">
-                (Optional)
-              </ThemedText>
+              Location <ThemedText type="smallBold" style={{ color: theme.danger }}>*</ThemedText>
             </ThemedText>
           </View>
 
@@ -347,7 +370,8 @@ export default function ReminderEditorScreen() {
                   styles.locOption,
                   {
                     backgroundColor: theme.backgroundElement,
-                    borderColor: theme.border,
+                    borderColor: locationMissing ? theme.danger : theme.border,
+                    borderWidth: locationMissing ? 1.5 : StyleSheet.hairlineWidth,
                     opacity: pressed ? 0.7 : 1,
                   },
                 ]}>
@@ -374,7 +398,12 @@ export default function ReminderEditorScreen() {
                   styles.locOption,
                   {
                     backgroundColor: linkOpen ? theme.accent + '14' : theme.backgroundElement,
-                    borderColor: linkOpen ? theme.accent : theme.border,
+                    borderColor: linkOpen
+                      ? theme.accent
+                      : locationMissing
+                        ? theme.danger
+                        : theme.border,
+                    borderWidth: locationMissing && !linkOpen ? 1.5 : StyleSheet.hairlineWidth,
                     opacity: pressed ? 0.7 : 1,
                   },
                 ]}>
@@ -394,6 +423,11 @@ export default function ReminderEditorScreen() {
                 />
               </Pressable>
             </View>
+          )}
+          {locationMissing && (
+            <ThemedText type="small" style={[styles.fieldError, { color: theme.danger }]}>
+              Choose where you want to be reminded.
+            </ThemedText>
           )}
 
           {linkOpen && (
@@ -479,34 +513,17 @@ export default function ReminderEditorScreen() {
             </View>
           )}
 
+          <RangePicker
+            radius={loc?.radius ?? pendingRadius}
+            hasLocation={loc != null}
+            onChange={(radius) => {
+              setPendingRadius(radius);
+              if (loc) updateReminder(reminder.id, { location: { ...loc, radius } });
+            }}
+          />
+
           {loc && (
             <>
-              <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
-                NUDGE ME WITHIN
-              </ThemedText>
-              <View style={styles.chips}>
-                {RADIUS_OPTIONS.map((m) => {
-                  const active = (loc.radius ?? DEFAULT_RADIUS) === m;
-                  return (
-                    <Pressable
-                      key={m}
-                      onPress={() => updateReminder(reminder.id, { location: { ...loc, radius: m } })}
-                      style={[
-                        styles.chip,
-                        {
-                          backgroundColor: active ? theme.accent : theme.backgroundElement,
-                          borderColor: active ? theme.accent : theme.border,
-                        },
-                      ]}>
-                      <ThemedText
-                        type="smallBold"
-                        style={{ color: active ? '#fff' : theme.textSecondary }}>
-                        {radiusLabel(m)}
-                      </ThemedText>
-                    </Pressable>
-                  );
-                })}
-              </View>
               <Pressable
                 onPress={() => {
                   keepOnBlur.current = true;
@@ -636,15 +653,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  sectionLabel: { letterSpacing: 1, marginTop: Spacing.four, marginBottom: Spacing.two },
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
-  chip: {
-    borderRadius: 999,
-    borderWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.one + 2,
-  },
-
   // Icon + label section heading (Notes)
   whenHead: {
     flexDirection: 'row',

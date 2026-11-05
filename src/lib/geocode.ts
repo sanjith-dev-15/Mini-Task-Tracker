@@ -188,9 +188,7 @@ export async function searchPlaces(
     (near ? `&lon=${near[0]}&lat=${near[1]}&zoom=13&location_bias_scale=0.6` : '');
   const data = await fetchJson<{ features?: GeoJSON.Feature[] }>(url);
   if (!data) return [];
-  return (data.features ?? [])
-    .map(toSuggestion)
-    .filter((s): s is Suggestion => s != null);
+  return (data.features ?? []).map(toSuggestion).filter((s): s is Suggestion => s != null);
 }
 
 /** Reverse-geocode via Photon. Returns undefined when it has nothing. */
@@ -251,18 +249,66 @@ async function reverseViaNominatim(lat: number, lng: number): Promise<string | u
     name?: string;
     display_name?: string;
     address?: Record<string, unknown>;
-  }>(
-    `${NOMINATIM_REVERSE}?format=jsonv2&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`,
-    { 'User-Agent': USER_AGENT },
-  );
+  }>(`${NOMINATIM_REVERSE}?format=jsonv2&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`, {
+    'User-Agent': USER_AGENT,
+  });
   if (!data) return undefined;
   // `display_name` piles on every administrative level ("... Bengaluru Central
   // City Corporation, Bangalore North, Bengaluru Urban, ..."), so compose from
   // the structured parts and keep `display_name` only as a floor.
   return (
-    nominatimAddressLine(data.address ?? {}, str(data.name)) ||
-    str(data.display_name) ||
-    undefined
+    nominatimAddressLine(data.address ?? {}, str(data.name)) || str(data.display_name) || undefined
+  );
+}
+
+const NOMINATIM_SEARCH = 'https://nominatim.openstreetmap.org/search';
+
+type Candidate = LatLng & { label: string };
+
+/** Of the top few hits, the one closest to `near` (same name, different branch/city). */
+function nearest(list: Candidate[], near?: LatLng | null): Candidate | null {
+  if (list.length === 0) return null;
+  if (!near) return list[0];
+  const d = (c: LatLng) =>
+    (c.lat - near.lat) ** 2 + ((c.lng - near.lng) * Math.cos((near.lat * Math.PI) / 180)) ** 2;
+  return list.reduce((best, c) => (d(c) < d(best) ? c : best));
+}
+
+/**
+ * Place name → coordinates, for shared Google Maps place links: Google only
+ * puts a place's coordinates in its page via JavaScript, so we look the name
+ * up instead. Nominatim first (it matches named places like stations and
+ * shops well — Photon tends to return the street named after them), Photon as
+ * the fallback. Among the top hits, the one nearest `near` wins.
+ */
+export async function geocodePlaceName(
+  name: string,
+  near?: LatLng | null,
+): Promise<Candidate | null> {
+  const since = Date.now() - lastNominatimAt;
+  if (since < NOMINATIM_MIN_GAP_MS) {
+    await new Promise((r) => setTimeout(r, NOMINATIM_MIN_GAP_MS - since));
+  }
+  lastNominatimAt = Date.now();
+
+  const osm = await fetchJson<
+    { lat?: string; lon?: string; name?: string; address?: Record<string, unknown> }[]
+  >(`${NOMINATIM_SEARCH}?format=jsonv2&limit=5&addressdetails=1&q=${encodeURIComponent(name)}`, {
+    'User-Agent': USER_AGENT,
+  });
+  const fromOsm: Candidate[] = (osm ?? [])
+    .map((h) => ({
+      lat: Number(h.lat),
+      lng: Number(h.lon),
+      label: joinParts([str(h.name) ?? name, nominatimAddressLine(h.address ?? {}, null)]),
+    }))
+    .filter((c) => Number.isFinite(c.lat) && Number.isFinite(c.lng));
+  if (fromOsm.length) return nearest(fromOsm, near);
+
+  const photon = await searchPlaces(name, near ? [near.lng, near.lat] : null);
+  return nearest(
+    photon.map((s) => ({ lat: s.lat, lng: s.lng, label: joinParts([s.name, s.address]) })),
+    near,
   );
 }
 

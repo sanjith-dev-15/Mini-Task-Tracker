@@ -17,4 +17,6 @@ android {
 dependencies {
   // Fused location for ArrivalWatchService (same version expo-location ships).
   implementation 'com.google.android.gms:play-services-location:21.0.1'
+  // LinkExpander (React Native already ships this version).
+  implementation 'com.squareup.okhttp3:okhttp:4.9.2'
 }

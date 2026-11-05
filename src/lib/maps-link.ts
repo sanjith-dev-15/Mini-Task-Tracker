@@ -11,7 +11,10 @@
  * coordinates out of the returned HTML.
  */
 
-import { reverseGeocode } from '@/lib/geocode';
+import * as Location from 'expo-location';
+
+import { geocodePlaceName, reverseGeocode, type LatLng } from '@/lib/geocode';
+import { expandLink } from '../../modules/reminder-overlay';
 
 const GOOGLE_HOST = /google\.[a-z.]+\/maps|goo\.gl|maps\.app\.goo\.gl|g\.co|glgoo\.gl/i;
 
@@ -88,18 +91,13 @@ export function parseLatLng(raw: string): { lat: number; lng: number } | null {
 }
 
 /**
- * Scrape coordinates from a Google Maps HTML page, most-reliable signal first.
- * A `maps.app.goo.gl` link often resolves to a `/maps/place/` URL that carries
- * only a feature id, so the coordinates have to come from the page itself.
+ * Scrape a pinned place's coordinates from a Google Maps HTML page.
+ *
+ * Deliberately NOT the page's `staticmap?center=` or `APP_INITIALIZATION_STATE`
+ * viewport: without JavaScript Google centres those on the *viewer's* own
+ * location, so they'd silently pin wherever the user is now.
  */
 function coordsFromHtml(html: string): { lat: number; lng: number } | null {
-  // The Static Maps thumbnail baked into the page: `staticmap?center=<lat>,<lng>`.
-  const center = html.match(/staticmap\?[^"'<>\s]*?center=(-?\d+\.\d+),(-?\d+\.\d+)/i);
-  if (center) {
-    const r = pair(center[1], center[2]);
-    if (r) return r;
-  }
-
   // `!3d<lat>!4d<lng>` — and the `!2d<lng>!3d<lat>` variant Google also embeds.
   const pin4 = html.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/);
   if (pin4) {
@@ -121,20 +119,11 @@ function coordsFromHtml(html: string): { lat: number; lng: number } | null {
     if (r) return r;
   }
 
-  // `APP_INITIALIZATION_STATE=[[[<x>,<lng>,<lat>], …`
-  const init = html.match(
-    /APP_INITIALIZATION_STATE=\[\[\[-?[\d.eE+]+,(-?\d+\.\d+),(-?\d+\.\d+)\]/,
-  );
-  if (init) {
-    const r = pair(init[2], init[1]); // [x, lng, lat]
-    if (r) return r;
-  }
-
   return null;
 }
 
-/** Resolve a Google Maps URL (short or long) to coordinates over the network. */
-async function resolveGoogleUrl(url: string): Promise<{ lat: number; lng: number } | null> {
+/** GET a URL (following redirects); its final URL and body, or null if unreachable. */
+async function fetchPage(url: string): Promise<{ url: string; html: string } | null> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 9000);
   try {
@@ -143,19 +132,13 @@ async function resolveGoogleUrl(url: string): Promise<{ lat: number; lng: number
       signal: controller.signal,
       headers: { 'User-Agent': BROWSER_UA, 'Accept-Language': 'en' },
     });
-
-    // 1. Redirected straight to a coordinate-bearing maps URL.
-    const fromUrl = parseLatLng(res.url);
-    if (fromUrl) return fromUrl;
-
-    // 2. Otherwise dig through the returned HTML (normalising the escapes
-    //    Google sprinkles through its inline JSON).
-    const clean = (await res.text())
+    // Normalise the escapes Google sprinkles through its inline JSON.
+    const html = (await res.text())
       .replace(/\\u003d/gi, '=')
       .replace(/\\u0026/gi, '&')
       .replace(/&amp;/gi, '&')
       .replace(/%2C/gi, ',');
-    return coordsFromHtml(clean) ?? parseLatLng(clean);
+    return { url: res.url || url, html };
   } catch {
     return null;
   } finally {
@@ -163,22 +146,67 @@ async function resolveGoogleUrl(url: string): Promise<{ lat: number; lng: number
   }
 }
 
+/** The place name in a `/maps/place/<Name>/…` or `?q=<text>` link, if any. */
+export function placeNameOf(url: string): string | null {
+  const decode = (s: string) => {
+    try {
+      return decodeURIComponent(s.replace(/\+/g, ' ')).trim();
+    } catch {
+      return s.replace(/\+/g, ' ').trim();
+    }
+  };
+  const place = url.match(/\/maps\/place\/([^/@?#]+)/)?.[1];
+  if (place) return decode(place) || null;
+  const q = url.match(/[?&](?:q|query)=([^&#]+)/)?.[1];
+  const text = q ? decode(q) : '';
+  // Coordinates aren't a name (parseLatLng handles those).
+  return text && !/^-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?$/.test(text) ? text : null;
+}
+
+async function lastKnownSpot(): Promise<LatLng | null> {
+  try {
+    const { granted } = await Location.getForegroundPermissionsAsync();
+    if (!granted) return null;
+    const pos = await Location.getLastKnownPositionAsync();
+    return pos ? { lat: pos.coords.latitude, lng: pos.coords.longitude } : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Resolve pasted text (a link or coordinates) to a location, hitting the network
- * to expand a Google link when an offline parse comes up empty. Returns null
- * when nothing usable is found.
+ * Resolve pasted text (a link or coordinates) to a location. Returns null when
+ * nothing usable is found.
+ *
+ * For a Google link: expand it (natively first — some ISPs, Jio among them,
+ * block `maps.app.goo.gl` at DNS), read coordinates off the full URL, else look
+ * up the place's name (Google keeps a place's coordinates out of its no-JS
+ * page), else scrape the page for a pin.
  */
 export async function resolveSharedLocation(raw: string): Promise<ParsedLocation | null> {
-  let coords = parseLatLng(raw);
+  const direct = parseLatLng(raw);
+  if (direct) return { ...direct, label: await reverseGeocode(direct.lat, direct.lng) };
 
-  if (!coords) {
-    const url = raw.trim().match(/https?:\/\/\S+/)?.[0];
-    if (url && GOOGLE_HOST.test(url)) {
-      coords = await resolveGoogleUrl(url);
-    }
+  const url = raw.trim().match(/https?:\/\/\S+/)?.[0];
+  if (!url || !GOOGLE_HOST.test(url)) return null;
+
+  const expanded = await expandLink(url);
+  const page = expanded ? null : await fetchPage(url);
+  const full = expanded ?? page?.url ?? url;
+  const name = placeNameOf(full);
+
+  const fromUrl = parseLatLng(full);
+  if (fromUrl) {
+    return { ...fromUrl, label: name ?? (await reverseGeocode(fromUrl.lat, fromUrl.lng)) };
   }
 
-  if (!coords) return null;
-  const label = await reverseGeocode(coords.lat, coords.lng);
-  return { ...coords, label };
+  if (name) {
+    const hit = await geocodePlaceName(name, await lastKnownSpot());
+    if (hit) return hit;
+  }
+
+  const html = page?.html ?? (await fetchPage(full))?.html;
+  const scraped = html ? (coordsFromHtml(html) ?? null) : null;
+  if (!scraped) return null;
+  return { ...scraped, label: name ?? (await reverseGeocode(scraped.lat, scraped.lng)) };
 }
