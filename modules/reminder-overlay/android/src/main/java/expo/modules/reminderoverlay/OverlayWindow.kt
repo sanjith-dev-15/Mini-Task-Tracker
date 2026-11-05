@@ -1,6 +1,8 @@
 package expo.modules.reminderoverlay
 
 import android.annotation.SuppressLint
+import android.app.Activity
+import android.app.KeyguardManager
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
@@ -15,6 +17,8 @@ import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
+import android.provider.Settings
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.KeyEvent
@@ -29,6 +33,8 @@ import android.widget.TextView
 /**
  * The "Reminder nearby" card, drawn as a system overlay window so it appears on
  * top of any app (or the home screen). Mirrors `src/components/arrival-modal.tsx`.
+ * With the screen off or locked it shows in [ArrivalActivity] instead, which
+ * wakes the screen and sits over the lock screen (overlay windows can't).
  * Several arrivals queue up and show one after another. All window work happens
  * on the main thread.
  */
@@ -42,6 +48,8 @@ internal object OverlayWindow {
     val url: String,
     /** null → follow the system dark-mode setting. */
     val dark: Boolean?,
+    /** Also post a heads-up / full-screen notification (native arrivals; JS posts its own). */
+    val notify: Boolean = false,
   )
 
   private const val PREFS = "reminder-overlay"
@@ -55,6 +63,8 @@ internal object OverlayWindow {
   val isShowing: Boolean
     get() = current != null
   private var view: View? = null
+  /** The lock-screen activity showing the current card, when it's not an overlay. */
+  private var host: Activity? = null
   private var appContext: Context? = null
 
   /** Set by the module so JS (when running) hears about "Mark done" right away. */
@@ -88,6 +98,34 @@ internal object OverlayWindow {
   private fun showNext() {
     val ctx = appContext ?: return
     val entry = queue.removeFirstOrNull() ?: return
+    current = entry
+    // Ring until the user responds to this card.
+    ArrivalAlarm.start(ctx)
+    if (entry.notify) ArrivalNotice.post(ctx, entry)
+    // Screen off / locked: the overlay would sit hidden under the lock screen.
+    if (isLocked(ctx) || !addWindow(ctx, entry)) ArrivalActivity.launch(ctx)
+  }
+
+  private fun isLocked(ctx: Context): Boolean {
+    val pm = ctx.getSystemService(Context.POWER_SERVICE) as PowerManager
+    val km = ctx.getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
+    return !pm.isInteractive || km.isKeyguardLocked
+  }
+
+  /** Called by [ArrivalActivity] to take over the current card. Null → nothing to show. */
+  fun attach(activity: Activity): View? {
+    val entry = current ?: return null
+    if (view != null) return null // already up as an overlay
+    host = activity
+    return build(activity, entry, queue.size, opaque = true)
+  }
+
+  fun detach(activity: Activity) {
+    if (host === activity) host = null
+  }
+
+  private fun addWindow(ctx: Context, entry: Entry): Boolean {
+    if (!Settings.canDrawOverlays(ctx)) return false
     val wm = ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     val v = build(ctx, entry, queue.size)
 
@@ -109,25 +147,26 @@ internal object OverlayWindow {
       windowAnimations = android.R.style.Animation_Dialog
     }
 
-    try {
+    return try {
       wm.addView(v, params)
-      current = entry
       view = v
-      // Ring until the user responds to this card.
-      ArrivalAlarm.start(ctx)
+      true
     } catch (_: Exception) {
       // Permission revoked between the check and now, or the window was rejected.
-      current = null
-      view = null
+      false
     }
   }
 
   private fun close() {
     val ctx = appContext
     val v = view
+    val h = host
+    val entry = current
     current = null
     view = null
+    host = null
     ArrivalAlarm.stop()
+    if (ctx != null && entry != null) ArrivalNotice.cancel(ctx, entry.id)
     if (ctx != null && v != null) {
       try {
         (ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager).removeView(v)
@@ -135,7 +174,13 @@ internal object OverlayWindow {
         // already gone
       }
     }
-    showNext()
+    if (h != null) {
+      h.finish()
+      // Let the activity finish before the next card (maybe) relaunches it.
+      main.postDelayed({ if (current == null) showNext() }, 400)
+    } else {
+      showNext()
+    }
   }
 
   /* -------------------------------------------------------------- actions */
@@ -144,8 +189,28 @@ internal object OverlayWindow {
 
   private fun open(entry: Entry) {
     val ctx = appContext
+    val h = host
+    // On the lock screen: ask for the unlock first, then open the app.
+    if (h != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      val km = h.getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
+      if (km.isKeyguardLocked) {
+        km.requestDismissKeyguard(
+          h,
+          object : KeyguardManager.KeyguardDismissCallback() {
+            override fun onDismissSucceeded() {
+              close()
+              launchUrl(h.applicationContext, entry)
+            }
+          },
+        )
+        return
+      }
+    }
     close()
-    if (ctx == null) return
+    if (ctx != null) launchUrl(ctx, entry)
+  }
+
+  private fun launchUrl(ctx: Context, entry: Entry) {
     try {
       val intent = Intent(Intent.ACTION_VIEW, Uri.parse(entry.url))
         .setPackage(ctx.packageName)
@@ -167,6 +232,10 @@ internal object OverlayWindow {
       val ids = prefs.getStringSet(DONE_KEY, emptySet())?.toMutableSet() ?: mutableSetOf()
       ids.add(entry.id)
       prefs.edit().putStringSet(DONE_KEY, ids).apply()
+      // Stop watching it, so leaving and coming back doesn't ring for a done reminder.
+      ArrivalWatch.remove(ctx, entry.id)
+      // That was the last one — nothing left to watch, so stop running in the background.
+      if (ArrivalWatch.targets(ctx).isEmpty()) ArrivalWatchService.stop(ctx)
     }
     close()
     onDone?.invoke(entry.id)
@@ -202,7 +271,7 @@ internal object OverlayWindow {
   )
 
   @SuppressLint("SetTextI18n")
-  private fun build(ctx: Context, entry: Entry, more: Int): View {
+  private fun build(ctx: Context, entry: Entry, more: Int, opaque: Boolean = false): View {
     val dark = entry.dark
       ?: ((ctx.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
         Configuration.UI_MODE_NIGHT_YES)
@@ -227,7 +296,8 @@ internal object OverlayWindow {
         return super.dispatchKeyEvent(event)
       }
     }
-    root.setBackgroundColor(Color.argb(115, 0, 0, 0))
+    // Over the lock screen it's a full alarm screen, not a dimmed app.
+    root.setBackgroundColor(if (opaque) Color.rgb(12, 12, 14) else Color.argb(115, 0, 0, 0))
     root.isClickable = true // block touches to the app underneath
     root.isFocusableInTouchMode = true
 

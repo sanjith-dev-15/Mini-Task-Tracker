@@ -22,6 +22,17 @@ declare class ReminderOverlayNative extends NativeModule<Events> {
   takeDone(): string[];
   startAlarm(): void;
   stopAlarm(force: boolean): void;
+  startWatch?(targetsJson: string): boolean;
+  stopWatch?(): void;
+  testArrival?(
+    id: string,
+    title: string,
+    subtitle: string,
+    notes: string,
+    url: string,
+    dark: boolean | null,
+    delayMs: number,
+  ): void;
 }
 
 /** null on iOS / web, or on a build made before this module was added. */
@@ -95,6 +106,43 @@ export function startAlarm() {
 export function stopAlarm(force = false) {
   try {
     native?.stopAlarm(force);
+  } catch {
+    // old build
+  }
+}
+
+/** This build checks arrivals natively (works with the screen off). */
+export const arrivalWatchSupported = typeof native?.startWatch === 'function';
+
+export type WatchTarget = OverlayContent & { lat: number; lng: number; radius: number };
+
+/**
+ * Hand the located reminders to the native watcher: a foreground service that
+ * checks each location fix itself and rings, wakes the screen and shows the
+ * card over the lock screen on arrival. An empty list stops it.
+ */
+export function startArrivalWatch(targets: WatchTarget[]): boolean {
+  try {
+    return native?.startWatch?.(JSON.stringify(targets)) ?? false;
+  } catch {
+    return false;
+  }
+}
+
+/** Fake a native arrival after `delayMs` (lock the phone meanwhile to test the screen-off alert). */
+export function testArrival(c: OverlayContent, delayMs: number): boolean {
+  if (!native?.testArrival) return false;
+  try {
+    native.testArrival(c.id, c.title, c.subtitle, c.notes, c.url, c.dark ?? null, delayMs);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function stopArrivalWatch() {
+  try {
+    native?.stopWatch?.();
   } catch {
     // old build
   }

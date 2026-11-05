@@ -4,6 +4,8 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
 import android.provider.Settings
 import expo.modules.kotlin.exception.Exceptions
@@ -81,6 +83,40 @@ class ReminderOverlayModule : Module() {
     /** Silence the alarm. Without `force`, leaves it ringing while a card is up. */
     Function("stopAlarm") { force: Boolean ->
       if (force || !OverlayWindow.isShowing) ArrivalAlarm.stop()
+    }
+
+    /**
+     * Watch for arrivals natively (works with the screen off). `targetsJson` is
+     * an array of `{id,title,subtitle,notes,url,dark,lat,lng,radius}`; an empty
+     * array stops the watcher. Returns false if the service couldn't start.
+     */
+    Function("startWatch") { targetsJson: String ->
+      val ctx = context
+      val changed = ArrivalWatch.setTargets(ctx, targetsJson)
+      if (ArrivalWatch.targets(ctx).isEmpty()) {
+        ArrivalWatchService.stop(ctx)
+        return@Function true
+      }
+      if (!changed && ArrivalWatchService.isRunning) return@Function true
+      ArrivalWatchService.start(ctx)
+    }
+
+    /** Fire a fake native arrival after `delayMs` — lock the phone meanwhile to try the screen-off path. */
+    Function("testArrival") { id: String, title: String, subtitle: String, notes: String, url: String, dark: Boolean?, delayMs: Int ->
+      val ctx = context
+      val pm = ctx.getSystemService(Context.POWER_SERVICE) as PowerManager
+      // Keep the CPU up through the wait, or the timer stalls once the screen is off.
+      pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "goku:arrival-test").acquire(delayMs + 10_000L)
+      Handler(Looper.getMainLooper()).postDelayed(
+        { OverlayWindow.show(ctx, OverlayWindow.Entry(id, title, subtitle, notes, url, dark, notify = true)) },
+        delayMs.toLong(),
+      )
+    }
+
+    Function("stopWatch") {
+      val ctx = context
+      ArrivalWatch.clear(ctx)
+      ArrivalWatchService.stop(ctx)
     }
 
     /** Reminder ids marked done from the overlay since the last call (then cleared). */

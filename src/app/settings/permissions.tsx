@@ -41,10 +41,12 @@ import {
 import { useReminders } from '@/lib/reminders';
 import { useThemeContext } from '@/lib/theme';
 import {
+  arrivalWatchSupported,
   overlaySupported,
   showOverlay,
   startAlarm,
   stopAlarm,
+  testArrival,
 } from '../../../modules/reminder-overlay';
 
 export default function PermissionsScreen() {
@@ -253,16 +255,18 @@ function LocationRemindersControl() {
 
   const on = enabled && state === 'ready';
 
+  const testContent = {
+    id: 'test-alert',
+    title: 'Test reminder',
+    subtitle: "You're near a place you set a reminder",
+    notes: 'This is how a location reminder alerts you. Tap any button to stop the alarm.',
+    url: 'app://settings/permissions',
+    dark: scheme === 'dark',
+  };
+
   // Fire a fake arrival so the alert (card + alarm + vibration) can be tried out.
   const testAlert = () => {
-    const shown = showOverlay({
-      id: 'test-alert',
-      title: 'Test reminder',
-      subtitle: "You're near a place you set a reminder",
-      notes: 'This is how a location reminder alerts you. Tap any button to stop the alarm.',
-      url: 'app://settings/permissions',
-      dark: scheme === 'dark',
-    });
+    const shown = showOverlay(testContent);
     if (shown) return;
     startAlarm();
     showAlert({
@@ -272,6 +276,19 @@ function LocationRemindersControl() {
       message:
         'Without "Display over other apps" you get this alarm and a notification, but not the card over other apps.',
       actions: [{ label: 'Stop', onPress: () => stopAlarm(true) }],
+    });
+  };
+
+  // Same, but in 10 s — time to lock the phone and check it wakes up and rings.
+  const testLocked = () => {
+    if (!testArrival(testContent, 10_000)) return;
+    showAlert({
+      icon: 'lock-closed-outline',
+      tone: 'accent',
+      title: 'Lock your phone now',
+      message:
+        'Turn the screen off. In 10 seconds it should wake up, ring and show the reminder over the lock screen.',
+      actions: [{ label: 'OK', onPress: () => {} }],
     });
   };
 
@@ -310,6 +327,13 @@ function LocationRemindersControl() {
         <Pressable onPress={testAlert} style={styles.cardAction}>
           <ThemedText type="smallBold" style={{ color: theme.accent }}>
             Test alert (sound + vibration)
+          </ThemedText>
+        </Pressable>
+      )}
+      {arrivalWatchSupported && (
+        <Pressable onPress={testLocked} style={styles.cardAction}>
+          <ThemedText type="smallBold" style={{ color: theme.accent }}>
+            Test with screen off (in 10 s)
           </ThemedText>
         </Pressable>
       )}
