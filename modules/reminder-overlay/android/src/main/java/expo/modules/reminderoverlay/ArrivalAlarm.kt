@@ -7,6 +7,7 @@ import android.media.RingtoneManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.os.VibrationAttributes
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -27,6 +28,8 @@ internal object ArrivalAlarm {
   private val main = Handler(Looper.getMainLooper())
   private var player: MediaPlayer? = null
   private var vibrator: Vibrator? = null
+  /** Keeps the CPU up while ringing — with the screen off it would otherwise sleep mid-alarm. */
+  private var wake: PowerManager.WakeLock? = null
   private val timeout = Runnable { stopNow() }
 
   fun start(ctx: Context) {
@@ -42,6 +45,14 @@ internal object ArrivalAlarm {
     main.removeCallbacks(timeout)
     main.postDelayed(timeout, MAX_MS)
     if (player != null || vibrator != null) return // already ringing
+
+    if (wake == null) {
+      val pm = ctx.getSystemService(Context.POWER_SERVICE) as PowerManager
+      wake = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "goku:arrival-alarm").apply {
+        setReferenceCounted(false)
+        acquire(MAX_MS + 5_000)
+      }
+    }
 
     val attrs = AudioAttributes.Builder()
       .setUsage(AudioAttributes.USAGE_ALARM)
@@ -100,6 +111,8 @@ internal object ArrivalAlarm {
     player = null
     vibrator?.cancel()
     vibrator = null
+    wake?.let { if (it.isHeld) it.release() }
+    wake = null
   }
 
   private fun vibratorOf(ctx: Context): Vibrator? =

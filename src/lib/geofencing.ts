@@ -6,9 +6,12 @@ import { Platform } from 'react-native';
 
 import type { Reminder } from '@/lib/reminders';
 import {
+  arrivalWatchSupported,
   overlaySupported,
   showOverlay,
   startAlarm,
+  startArrivalWatch,
+  stopArrivalWatch,
   type OverlayContent,
 } from '../../modules/reminder-overlay';
 
@@ -415,8 +418,33 @@ export async function syncGeofences(reminders: Reminder[]): Promise<void> {
       await Location.stopGeofencingAsync(GEOFENCE_TASK).catch(() => {});
     }
     await stopWatching();
+    stopArrivalWatch();
     await AsyncStorage.removeItem(SIGNATURE_KEY);
     return;
+  }
+
+  // Android build with the native watcher: it does the whole job (and keeps
+  // working with the screen off, which the JS tasks below can't — their
+  // events wait for Doze to end). Turn the JS path off so nothing alerts twice.
+  if (Platform.OS === 'android' && arrivalWatchSupported) {
+    const dark = await overlayDarkMode();
+    const targets = reminders
+      .filter((r) => r.location && !r.done)
+      .map((r) => ({
+        ...arrivalOverlayContent(r, dark),
+        lat: r.location!.lat,
+        lng: r.location!.lng,
+        radius: r.location!.radius ?? DEFAULT_RADIUS,
+      }));
+    if (startArrivalWatch(targets)) {
+      if (await isStarted()) {
+        await Location.stopGeofencingAsync(GEOFENCE_TASK).catch(() => {});
+      }
+      await stopWatching();
+      await AsyncStorage.removeItem(SIGNATURE_KEY);
+      return;
+    }
+    // Couldn't start the service — fall back to the JS tasks.
   }
 
   await startWatching();

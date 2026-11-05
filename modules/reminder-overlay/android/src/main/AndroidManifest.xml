@@ -5,4 +5,28 @@
   <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
   <!-- Arrival alarm: repeating vibration until the card is answered. -->
   <uses-permission android:name="android.permission.VIBRATE" />
+  <!-- Keep the CPU up while the alarm rings with the screen off. -->
+  <uses-permission android:name="android.permission.WAKE_LOCK" />
+  <!-- Native arrival watcher: location foreground service. -->
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+  <!-- Locked phone: the alert opens the card over the lock screen, like an alarm. -->
+  <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+
+  <application>
+    <service
+      android:name="expo.modules.reminderoverlay.ArrivalWatchService"
+      android:exported="false"
+      android:foregroundServiceType="location" />
+
+    <activity
+      android:name="expo.modules.reminderoverlay.ArrivalActivity"
+      android:exported="false"
+      android:excludeFromRecents="true"
+      android:launchMode="singleInstance"
+      android:showWhenLocked="true"
+      android:taskAffinity=""
+      android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
+      android:turnScreenOn="true" />
+  </application>
 </manifest>
