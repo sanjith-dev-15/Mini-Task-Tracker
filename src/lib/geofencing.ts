@@ -47,7 +47,7 @@ const THEME_KEY = 'theme:mode';
 const DEEP_LINK_SCHEME = 'app';
 
 /** Radius options offered in the reminder editor (metres). */
-export const RADIUS_OPTIONS = [200, 500, 1000] as const;
+export const RADIUS_OPTIONS = [100, 200, 500, 1000, 2000] as const;
 export const DEFAULT_RADIUS = 500;
 
 export function radiusLabel(m: number): string {

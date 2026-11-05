@@ -113,6 +113,11 @@ class ReminderOverlayModule : Module() {
       )
     }
 
+    /** Full URL behind a short Maps link, resolving `goo.gl` via DNS-over-HTTPS (ISP blocks). */
+    AsyncFunction("expandLink") { url: String ->
+      LinkExpander.expand(url)
+    }
+
     Function("stopWatch") {
       val ctx = context
       ArrivalWatch.clear(ctx)

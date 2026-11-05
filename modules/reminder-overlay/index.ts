@@ -24,6 +24,7 @@ declare class ReminderOverlayNative extends NativeModule<Events> {
   stopAlarm(force: boolean): void;
   startWatch?(targetsJson: string): boolean;
   stopWatch?(): void;
+  expandLink?(url: string): Promise<string | null>;
   testArrival?(
     id: string,
     title: string,
@@ -137,6 +138,18 @@ export function testArrival(c: OverlayContent, delayMs: number): boolean {
     return true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Expand a short link natively, looking `goo.gl` up via DNS-over-HTTPS (some
+ * ISPs block it). Null on iOS / old builds or when it can't be reached.
+ */
+export async function expandLink(url: string): Promise<string | null> {
+  try {
+    return (await native?.expandLink?.(url)) ?? null;
+  } catch {
+    return null;
   }
 }
 

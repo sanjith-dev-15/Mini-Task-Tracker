@@ -35,7 +35,9 @@ export default function MapScreen() {
 
   const choose = (coord: ReminderLocation) => {
     if (pickFor) {
-      updateReminder(pickFor, { location: coord });
+      // Keep the alert range already chosen in the editor.
+      const radius = getReminder(pickFor)?.location?.radius ?? coord.radius;
+      updateReminder(pickFor, { location: { ...coord, radius } });
       close();
     } else {
       // `fresh` → the editor drops it on exit unless it's named (see [id].tsx).

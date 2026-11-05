@@ -11,6 +11,7 @@ import {
 } from 'react';
 
 import { createId } from '@/lib/notes';
+import { defaultDueAt } from '@/lib/reminder-dates';
 
 const STORAGE_KEY = 'reminders:v1';
 const VIEW_KEY = 'reminders:view';
@@ -161,7 +162,9 @@ export function RemindersProvider({ children }: { children: ReactNode }) {
   );
 
   const createReminder = useCallback<RemindersContextValue['createReminder']>((patch) => {
-    const reminder: Reminder = { ...emptyReminder(), ...patch };
+    // New reminders are for Today unless the user picks otherwise. (An unset
+    // location radius already means the default 500 m everywhere.)
+    const reminder: Reminder = { ...emptyReminder(), dueAt: defaultDueAt(), ...patch };
     setReminders((prev) => [reminder, ...prev]);
     return reminder;
   }, []);
