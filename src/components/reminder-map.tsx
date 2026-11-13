@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
 import {
   Camera,
@@ -8,7 +9,7 @@ import {
   Marker,
   useCurrentPosition,
 } from '@maplibre/maplibre-react-native';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ComponentProps } from 'react';
 import {
   ActivityIndicator,
   Keyboard,
@@ -54,10 +55,46 @@ const STYLE_URL = {
   dark: 'https://tiles.openfreemap.org/styles/dark',
 };
 
+/**
+ * Satellite view — Esri World Imagery, with Esri's place-name layer on top so
+ * towns and areas stay readable. Raster tiles, no API key.
+ */
+const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services';
+type StyleJson = Exclude<ComponentProps<typeof Map>['mapStyle'], string | undefined>;
+const SATELLITE_STYLE: StyleJson = {
+  version: 8,
+  sources: {
+    imagery: {
+      type: 'raster',
+      tiles: [`${ESRI}/World_Imagery/MapServer/tile/{z}/{y}/{x}`],
+      tileSize: 256,
+      maxzoom: 19,
+      attribution: 'Powered by Esri · Esri, Maxar, Earthstar Geographics, GIS User Community',
+    },
+    places: {
+      type: 'raster',
+      tiles: [`${ESRI}/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}`],
+      tileSize: 256,
+      maxzoom: 19,
+    },
+  },
+  layers: [
+    { id: 'imagery', type: 'raster', source: 'imagery' },
+    { id: 'places', type: 'raster', source: 'places' },
+  ],
+};
+
+type MapKind = 'map' | 'satellite';
+const MAP_KIND_KEY = 'map:kind';
+/** Shared across map instances (home preview + full screen) during a session. */
+let savedKind: MapKind = 'map';
+
 /** Fallback camera when nothing is pinned and location is unavailable. */
 const DEFAULT_CENTER: [number, number] = [78.9629, 20.5937]; // India
 const DEFAULT_ZOOM = 3.5;
 const PIN_ZOOM = 13;
+/** "My location" zooms in to street level, like Google Maps. */
+const MY_LOCATION_ZOOM = 17;
 /** Your live-location dot — green, so it never reads as a (blue) reminder pin. */
 const LIVE_COLOR = '#22C55E';
 const PIN_LABEL_HEIGHT = 22;
@@ -134,6 +171,32 @@ export function ReminderMap({
   const insets = useSafeAreaInsets();
   const cameraRef = useRef<CameraRef>(null);
   const [locating, setLocating] = useState(false);
+
+  /** Map rotation in degrees (0 = north up), rounded to whole degrees. */
+  const [bearing, setBearing] = useState(0);
+  const trackBearing = (b: number) => {
+    const rounded = Math.round(b) % 360;
+    setBearing((cur) => (cur === rounded ? cur : rounded));
+  };
+
+  // Street map vs satellite — remembered between launches.
+  const [kind, setKind] = useState<MapKind>(savedKind);
+  useEffect(() => {
+    AsyncStorage.getItem(MAP_KIND_KEY)
+      .then((v) => {
+        if (v === 'map' || v === 'satellite') {
+          savedKind = v;
+          setKind(v);
+        }
+      })
+      .catch(() => {});
+  }, []);
+  const toggleKind = () => {
+    const next: MapKind = kind === 'satellite' ? 'map' : 'satellite';
+    savedKind = next;
+    setKind(next);
+    AsyncStorage.setItem(MAP_KIND_KEY, next).catch(() => {});
+  };
 
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<Suggestion[]>([]);
@@ -213,7 +276,7 @@ export function ReminderMap({
       setUserLoc([pos.coords.longitude, pos.coords.latitude]);
       cameraRef.current?.easeTo({
         center: [pos.coords.longitude, pos.coords.latitude],
-        zoom: PIN_ZOOM,
+        zoom: MY_LOCATION_ZOOM,
         duration: 700,
       });
     } catch {
@@ -243,7 +306,7 @@ export function ReminderMap({
       setSpot({ ...here, label: undefined });
       cameraRef.current?.easeTo({
         center: [here.lng, here.lat],
-        zoom: PIN_ZOOM,
+        zoom: MY_LOCATION_ZOOM,
         duration: 700,
       });
       const label = await reverseGeocode(here.lat, here.lng);
@@ -357,6 +420,57 @@ export function ReminderMap({
       ]}>
       <Ionicons name={locating ? 'ellipsis-horizontal' : 'locate'} size={18} color={colors.accent} />
     </Pressable>
+  );
+
+  const satellite = kind === 'satellite';
+  const layerButton = (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={satellite ? 'Show street map' : 'Show satellite view'}
+      onPress={toggleKind}
+      style={({ pressed }) => [
+        styles.roundBtn,
+        {
+          backgroundColor: satellite ? colors.accent : colors.card,
+          borderColor: satellite ? colors.accent : colors.border,
+          opacity: pressed ? 0.7 : 1,
+        },
+      ]}>
+      <Ionicons name={satellite ? 'map-outline' : 'earth'} size={18} color={satellite ? '#fff' : colors.accent} />
+    </Pressable>
+  );
+
+  // Compass — only while the map is rotated; tap to turn north back up.
+  const rotated = bearing !== 0;
+  const compassButton = rotated && (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="Reset map to north"
+      onPress={() =>
+        cameraRef.current?.easeTo({
+          center: centerRef.current ?? initialViewState.center,
+          bearing: 0,
+          pitch: 0,
+          duration: 400,
+        })
+      }
+      style={({ pressed }) => [
+        styles.roundBtn,
+        { backgroundColor: colors.card, borderColor: colors.border, opacity: pressed ? 0.7 : 1 },
+      ]}>
+      <View style={{ transform: [{ rotate: `${-bearing}deg` }] }}>
+        <Ionicons name="navigate" size={18} color={colors.danger} style={styles.compassIcon} />
+      </View>
+    </Pressable>
+  );
+
+  /** Right-hand column: compass, then layer toggle, then "my location". */
+  const sideButtons = (
+    <View style={styles.sideButtons}>
+      {compassButton}
+      {layerButton}
+      {locateButton}
+    </View>
   );
 
   const searchBox = (
@@ -501,14 +615,20 @@ export function ReminderMap({
       ]}>
       <Map
         style={StyleSheet.absoluteFill}
-        mapStyle={scheme === 'dark' ? STYLE_URL.dark : STYLE_URL.light}
+        mapStyle={
+          satellite ? SATELLITE_STYLE : scheme === 'dark' ? STYLE_URL.dark : STYLE_URL.light
+        }
         logo={false}
+        // Built-in compass sits at the top; ours lives in the side button column.
+        compass={false}
+        onRegionIsChanging={(e) => trackBearing(e.nativeEvent.bearing)}
         attributionPosition={searchable ? { top: 8, right: 8 } : { bottom: 6, left: 6 }}
         onPress={() => {
           Keyboard.dismiss();
           setSelectedId(null);
         }}
         onRegionDidChange={(e) => {
+          trackBearing(e.nativeEvent.bearing);
           const c = e.nativeEvent.center;
           if (Array.isArray(c) && c.length >= 2) centerRef.current = [c[0], c[1]];
         }}
@@ -728,10 +848,10 @@ export function ReminderMap({
             {resultsList}
             {searchBox}
           </View>
-          {locateButton}
+          {sideButtons}
         </Animated.View>
       ) : !searchable ? (
-        <View style={[styles.cornerBtn, styles.locateCorner]}>{locateButton}</View>
+        <View style={styles.locateCorner}>{sideButtons}</View>
       ) : null}
     </View>
   );
@@ -895,7 +1015,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  locateCorner: { right: 10, bottom: 10 },
+  locateCorner: { position: 'absolute', right: 10, bottom: 10 },
+  sideButtons: { gap: 8 },
+  // Ionicons "navigate" points up-right; turn it so the tip points north.
+  compassIcon: { transform: [{ rotate: '-45deg' }] },
   expandBtn: { right: 10, top: 10 },
   pickHint: {
     position: 'absolute',

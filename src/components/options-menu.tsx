@@ -42,7 +42,7 @@ export function OptionsMenu({
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={styles.scrim} onPress={onClose}>
         <Pressable onPress={() => {}} style={[styles.anchor, { top }]}>
-          <GlassSurface glass="regular" radius={20} style={styles.menu}>
+          <GlassSurface modal glass="regular" radius={20} style={styles.menu}>
             {sections.map((section, i) => (
               <Fragment key={section.title}>
                 {i > 0 && <View style={[styles.divider, { backgroundColor: theme.border }]} />}

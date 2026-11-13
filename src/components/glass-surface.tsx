@@ -1,7 +1,7 @@
 import { GlassView, isLiquidGlassAvailable } from 'expo-glass-effect';
 import { StyleSheet, View, type ViewProps } from 'react-native';
 
-import { useThemeContext } from '@/lib/theme';
+import { MODAL_FALLBACK_ALPHA, MODAL_LIQUID_ALPHA, useThemeContext } from '@/lib/theme';
 
 type Props = ViewProps & {
   /** 'regular' frosted panel (default) or 'clear' for a lighter tint. */
@@ -9,6 +9,11 @@ type Props = ViewProps & {
   /** Optional glass tint / fallback background colour. */
   tint?: string;
   radius?: number;
+  /**
+   * Set on modal / popup cards so they follow the user's "Modal opacity"
+   * setting (Settings → Appearance). Ignored when `tint` is given.
+   */
+  modal?: boolean;
 };
 
 /**
@@ -22,27 +27,36 @@ export function GlassSurface({
   glass = 'regular',
   tint,
   radius = 20,
+  modal = false,
   children,
   ...rest
 }: Props) {
-  const { scheme } = useThemeContext();
+  const { scheme, modalOpacity } = useThemeContext();
   const isDark = scheme === 'dark';
   const liquid = isLiquidGlassAvailable();
+  const base = isDark ? '28,28,32' : '255,255,255';
 
   if (liquid) {
+    const backingAlpha = modal && !tint ? MODAL_LIQUID_ALPHA[modalOpacity] : 0;
     return (
       <GlassView
         glassEffectStyle={glass}
         tintColor={tint}
         style={[{ borderRadius: radius, overflow: 'hidden' }, style]}
         {...rest}>
+        {backingAlpha > 0 && (
+          <View
+            pointerEvents="none"
+            style={[StyleSheet.absoluteFill, { backgroundColor: `rgba(${base},${backingAlpha})` }]}
+          />
+        )}
         {children}
       </GlassView>
     );
   }
 
-  const fallbackBg =
-    tint ?? (isDark ? 'rgba(28,28,32,0.66)' : 'rgba(255,255,255,0.66)');
+  const alpha = modal ? MODAL_FALLBACK_ALPHA[modalOpacity] : 0.66;
+  const fallbackBg = tint ?? `rgba(${base},${alpha})`;
   const border = isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.07)';
 
   return (

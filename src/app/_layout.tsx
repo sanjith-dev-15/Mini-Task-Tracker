@@ -157,7 +157,12 @@ function SidebarContent(props: DrawerContentComponentProps) {
       inactiveTintColor={colors.textSecondary}
       activeBackgroundColor={colors.backgroundSelected}
       icon={({ color, size }) => <Ionicons name={icon} size={size} color={color} />}
-      onPress={() => navigation.navigate(name)}
+      onPress={() => {
+        // Always close the sidebar — navigating to the screen you're already on
+        // changes nothing, so the drawer would otherwise stay open.
+        navigation.closeDrawer();
+        if (currentRoute !== name) navigation.navigate(name);
+      }}
     />
   );
 
