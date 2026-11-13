@@ -164,7 +164,7 @@ export function UpdatePrompt({ ready }: { ready: boolean }) {
         <Animated.View
           entering={FadeInDown.duration(220).springify().damping(20)}
           style={styles.cardWrap}>
-          <GlassSurface glass="regular" radius={28} style={styles.card}>
+          <GlassSurface modal glass="regular" radius={28} style={styles.card}>
             <View style={styles.header}>
               <ThemedText type="subtitle" style={styles.center}>
                 Software Update

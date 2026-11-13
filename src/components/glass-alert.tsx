@@ -56,7 +56,7 @@ export function GlassAlert({
         <Animated.View
           entering={FadeInDown.duration(220).springify().damping(20)}
           pointerEvents="box-none">
-          <GlassSurface glass="regular" radius={28} style={styles.card}>
+          <GlassSurface modal glass="regular" radius={28} style={styles.card}>
             {icon && (
               <View style={[styles.iconDisc, { backgroundColor: toneColor + '1F' }]}>
                 <Ionicons name={icon} size={26} color={toneColor} />

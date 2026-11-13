@@ -3,12 +3,21 @@ import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GlassIconButton } from '@/components/glass-icon-button';
+import { GlassSurface } from '@/components/glass-surface';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { goBack } from '@/lib/navigation';
-import { useThemeContext, type ThemeMode } from '@/lib/theme';
+import { MODAL_OPACITY_LEVELS, useThemeContext, type ThemeMode } from '@/lib/theme';
+
+const OPACITY_HINT: Record<number, string> = {
+  1: 'Most see-through',
+  2: 'Default glass',
+  3: 'Easier to read',
+  4: 'Mostly solid',
+  5: 'Solid',
+};
 
 const OPTIONS: {
   mode: ThemeMode;
@@ -23,7 +32,7 @@ const OPTIONS: {
 
 export default function AppearanceScreen() {
   const theme = useTheme();
-  const { mode, setMode } = useThemeContext();
+  const { mode, setMode, modalOpacity, setModalOpacity } = useThemeContext();
   const insets = useSafeAreaInsets();
 
   return (
@@ -66,6 +75,61 @@ export default function AppearanceScreen() {
             </Pressable>
           ))}
         </View>
+
+        <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
+          POPUP OPACITY
+        </ThemedText>
+        <View
+          style={[
+            styles.card,
+            styles.opacityCard,
+            { backgroundColor: theme.card, borderColor: theme.border },
+          ]}>
+          <ThemedText type="small" themeColor="textSecondary">
+            Make popups and menus more solid if their text is hard to read.
+          </ThemedText>
+
+          {/* Live preview: a glass card over colour, like a real popup. */}
+          <View style={styles.preview}>
+            <View style={[styles.blob, styles.blobA]} />
+            <View style={[styles.blob, styles.blobB]} />
+            <View style={[styles.blob, styles.blobC]} />
+            <GlassSurface modal glass="regular" radius={18} style={styles.previewCard}>
+              <ThemedText type="smallBold">Reminder</ThemedText>
+              <ThemedText type="small" themeColor="textSecondary">
+                This is how popup text will look.
+              </ThemedText>
+            </GlassSurface>
+          </View>
+
+          <View style={styles.levels}>
+            {MODAL_OPACITY_LEVELS.map((level) => {
+              const active = modalOpacity === level;
+              return (
+                <Pressable
+                  key={level}
+                  onPress={() => setModalOpacity(level)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                  accessibilityLabel={`Popup opacity level ${level}`}
+                  style={({ pressed }) => [
+                    styles.level,
+                    {
+                      backgroundColor: active ? theme.accent : theme.backgroundElement,
+                      opacity: pressed ? 0.8 : 1,
+                    },
+                  ]}>
+                  <ThemedText type="smallBold" style={active ? styles.levelActive : undefined}>
+                    {level}
+                  </ThemedText>
+                </Pressable>
+              );
+            })}
+          </View>
+          <ThemedText type="small" themeColor="textSecondary" style={styles.levelHint}>
+            Level {modalOpacity} · {OPACITY_HINT[modalOpacity]}
+          </ThemedText>
+        </View>
       </ScrollView>
     </ThemedView>
   );
@@ -100,4 +164,28 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.three,
   },
   rowIcon: { width: 24 },
+  sectionLabel: { letterSpacing: 1, paddingHorizontal: Spacing.one, marginTop: Spacing.four, marginBottom: Spacing.two },
+  opacityCard: { padding: Spacing.three, gap: Spacing.three },
+  preview: {
+    height: 120,
+    borderRadius: 14,
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  blob: { position: 'absolute', width: 120, height: 120, borderRadius: 60 },
+  blobA: { backgroundColor: '#F26722', left: -10, top: -30 },
+  blobB: { backgroundColor: '#3C87F7', right: 10, bottom: -40 },
+  blobC: { backgroundColor: '#30A46C', left: '40%', top: 20, width: 80, height: 80 },
+  previewCard: { paddingHorizontal: Spacing.three, paddingVertical: Spacing.two, gap: 2 },
+  levels: { flexDirection: 'row', gap: Spacing.two },
+  level: {
+    flex: 1,
+    height: 40,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  levelActive: { color: '#fff' },
+  levelHint: { textAlign: 'center' },
 });

@@ -236,6 +236,37 @@ export default function ReminderEditorScreen() {
             <View style={styles.heroText}>
               <ThemedText style={styles.heroTitle}>Remind me to…</ThemedText>
               <ThemedText themeColor="textSecondary">Set a reminder for anything ✨</ThemedText>
+              {!isNew && (
+                <Pressable
+                  onPress={() => updateReminder(reminder.id, { done: !reminder.done })}
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: reminder.done }}
+                  hitSlop={6}
+                  style={({ pressed }) => [
+                    styles.donePill,
+                    {
+                      backgroundColor: reminder.done ? theme.accent + '1F' : theme.backgroundElement,
+                      borderColor: reminder.done ? theme.accent : theme.border,
+                      opacity: pressed ? 0.75 : 1,
+                    },
+                  ]}>
+                  <View
+                    style={[
+                      styles.checkbox,
+                      {
+                        borderColor: reminder.done ? theme.accent : theme.textSecondary,
+                        backgroundColor: reminder.done ? theme.accent : 'transparent',
+                      },
+                    ]}>
+                    {reminder.done && <Ionicons name="checkmark" size={13} color="#fff" />}
+                  </View>
+                  <ThemedText
+                    type="smallBold"
+                    style={{ color: reminder.done ? theme.accent : theme.text }}>
+                    {reminder.done ? 'Completed' : 'Mark complete'}
+                  </ThemedText>
+                </Pressable>
+              )}
             </View>
           </View>
 
@@ -266,26 +297,6 @@ export default function ReminderEditorScreen() {
             <ThemedText type="small" style={[styles.fieldError, { color: theme.danger }]}>
               Add what you want to be reminded about.
             </ThemedText>
-          )}
-
-          {!isNew && (
-          <Pressable
-            onPress={() => updateReminder(reminder.id, { done: !reminder.done })}
-            style={styles.doneRow}>
-            <View
-              style={[
-                styles.checkbox,
-                {
-                  borderColor: reminder.done ? theme.accent : theme.border,
-                  backgroundColor: reminder.done ? theme.accent : 'transparent',
-                },
-              ]}>
-              {reminder.done && <Ionicons name="checkmark" size={15} color="#fff" />}
-            </View>
-            <ThemedText themeColor={reminder.done ? 'textSecondary' : 'text'}>
-              {reminder.done ? 'Completed' : 'Mark complete'}
-            </ThemedText>
-          </Pressable>
           )}
 
           <WhenPicker
@@ -639,16 +650,22 @@ const styles = StyleSheet.create({
   },
   titleInput: { flex: 1, fontSize: 16, paddingVertical: Spacing.three },
   fieldError: { marginTop: Spacing.one, paddingHorizontal: Spacing.one },
-  doneRow: {
+  donePill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.two,
-    paddingVertical: Spacing.two,
+    alignSelf: 'flex-start',
+    gap: Spacing.one + 2,
+    marginTop: Spacing.two,
+    paddingVertical: Spacing.one + 2,
+    paddingLeft: Spacing.two,
+    paddingRight: Spacing.three,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   checkbox: {
-    width: 24,
-    height: 24,
-    borderRadius: 7,
+    width: 20,
+    height: 20,
+    borderRadius: 6,
     borderWidth: 2,
     alignItems: 'center',
     justifyContent: 'center',

@@ -19,6 +19,30 @@ export type ThemeMode = 'light' | 'dark' | 'system';
 export type ColorScheme = 'light' | 'dark';
 
 const STORAGE_KEY = 'theme:mode';
+const MODAL_OPACITY_KEY = 'theme:modalOpacity';
+
+/** How solid the glass modal cards are: 1 = most see-through, 5 = solid. */
+export type ModalOpacityLevel = 1 | 2 | 3 | 4 | 5;
+export const MODAL_OPACITY_LEVELS: ModalOpacityLevel[] = [1, 2, 3, 4, 5];
+/** Level 2 matches the original glass look. */
+const DEFAULT_MODAL_OPACITY: ModalOpacityLevel = 2;
+
+/** Background alpha of the frosted fallback card (Android / older iOS). */
+export const MODAL_FALLBACK_ALPHA: Record<ModalOpacityLevel, number> = {
+  1: 0.5,
+  2: 0.66,
+  3: 0.8,
+  4: 0.9,
+  5: 1,
+};
+/** Alpha of the backing layer added under content on real liquid glass (iOS 26+). */
+export const MODAL_LIQUID_ALPHA: Record<ModalOpacityLevel, number> = {
+  1: 0,
+  2: 0,
+  3: 0.4,
+  4: 0.7,
+  5: 0.95,
+};
 
 export type ThemeColors = (typeof Colors)[ColorScheme];
 
@@ -31,6 +55,10 @@ type ThemeContextValue = {
   scheme: ColorScheme;
   /** Colors for the current scheme. */
   colors: ThemeColors;
+  /** Opacity level of glass modal cards (1–5). */
+  modalOpacity: ModalOpacityLevel;
+  /** Change + persist the modal opacity level. */
+  setModalOpacity: (level: ModalOpacityLevel) => void;
 };
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
@@ -38,15 +66,24 @@ const ThemeContext = createContext<ThemeContextValue | null>(null);
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const systemScheme = useSystemColorScheme();
   const [mode, setModeState] = useState<ThemeMode>('system');
+  const [modalOpacity, setModalOpacityState] =
+    useState<ModalOpacityLevel>(DEFAULT_MODAL_OPACITY);
   const hydrated = useRef(false);
 
-  // Load the saved choice once on startup.
+  // Load the saved choices once on startup.
   useEffect(() => {
     (async () => {
       try {
-        const saved = await AsyncStorage.getItem(STORAGE_KEY);
+        const [saved, savedOpacity] = await Promise.all([
+          AsyncStorage.getItem(STORAGE_KEY),
+          AsyncStorage.getItem(MODAL_OPACITY_KEY),
+        ]);
         if (saved === 'light' || saved === 'dark' || saved === 'system') {
           setModeState(saved);
+        }
+        const level = Number(savedOpacity);
+        if (MODAL_OPACITY_LEVELS.includes(level as ModalOpacityLevel)) {
+          setModalOpacityState(level as ModalOpacityLevel);
         }
       } catch {
         // ignore – fall back to "system"
@@ -63,12 +100,26 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     });
   };
 
+  const setModalOpacity = (level: ModalOpacityLevel) => {
+    setModalOpacityState(level);
+    AsyncStorage.setItem(MODAL_OPACITY_KEY, String(level)).catch(() => {
+      // ignore – the in-memory value still updates the UI
+    });
+  };
+
   const scheme: ColorScheme =
     mode === 'system' ? (systemScheme === 'dark' ? 'dark' : 'light') : mode;
 
   const value = useMemo<ThemeContextValue>(
-    () => ({ mode, setMode, scheme, colors: Colors[scheme] }),
-    [mode, scheme],
+    () => ({
+      mode,
+      setMode,
+      scheme,
+      colors: Colors[scheme],
+      modalOpacity,
+      setModalOpacity,
+    }),
+    [mode, scheme, modalOpacity],
   );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
