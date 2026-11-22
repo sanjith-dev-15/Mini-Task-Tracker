@@ -176,6 +176,9 @@ async function fetchJson<T>(url: string, headers?: Record<string, string>): Prom
  * `location_bias_scale` pulls nearby hits up the ranking hard enough that
  * "reliance fresh" resolves to the one down the road rather than the one in
  * another state; Photon's default of 0.2 barely moves the order at all.
+ *
+ * Throws when Photon can't be reached (offline, timeout, server error), so the
+ * UI can say "search needs internet" instead of a misleading "no place found".
  */
 export async function searchPlaces(
   q: string,
@@ -187,7 +190,7 @@ export async function searchPlaces(
     encodeURIComponent(q) +
     (near ? `&lon=${near[0]}&lat=${near[1]}&zoom=13&location_bias_scale=0.6` : '');
   const data = await fetchJson<{ features?: GeoJSON.Feature[] }>(url);
-  if (!data) return [];
+  if (!data) throw new Error('Place search is unavailable');
   return (data.features ?? []).map(toSuggestion).filter((s): s is Suggestion => s != null);
 }
 
@@ -305,7 +308,7 @@ export async function geocodePlaceName(
     .filter((c) => Number.isFinite(c.lat) && Number.isFinite(c.lng));
   if (fromOsm.length) return nearest(fromOsm, near);
 
-  const photon = await searchPlaces(name, near ? [near.lng, near.lat] : null);
+  const photon = await searchPlaces(name, near ? [near.lng, near.lat] : null).catch(() => []);
   return nearest(
     photon.map((s) => ({ lat: s.lat, lng: s.lng, label: joinParts([s.name, s.address]) })),
     near,

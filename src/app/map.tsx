@@ -74,6 +74,9 @@ export default function MapScreen() {
         onPressPin={picking ? () => {} : openReminder}
         onLongPressMap={choose}
         onClose={close}
+        onOpenOfflineMaps={() =>
+          router.push({ pathname: '/settings/offline-maps', params: { from: 'map' } })
+        }
       />
     </ThemedView>
   );
