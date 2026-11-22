@@ -648,7 +648,7 @@ export function ReminderMap({
 
   const searchBox = (
     <View style={[styles.searchBox, { backgroundColor: colors.card, borderColor: colors.border }]}>
-      <Ionicons name="search" size={17} color={colors.textSecondary} />
+      <Ionicons name="search" size={21} color={colors.textSecondary} />
       <TextInput
         value={query}
         onChangeText={onQueryChange}
@@ -663,7 +663,7 @@ export function ReminderMap({
         <ActivityIndicator size="small" color={colors.textSecondary} />
       ) : query.length > 0 ? (
         <Pressable onPress={clearSearch} hitSlop={8}>
-          <Ionicons name="close-circle" size={18} color={colors.textSecondary} />
+          <Ionicons name="close-circle" size={22} color={colors.textSecondary} />
         </Pressable>
       ) : null}
     </View>
@@ -1182,13 +1182,13 @@ const styles = StyleSheet.create({
   searchBox: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    height: 40,
-    borderRadius: 20,
+    gap: 10,
+    height: 52,
+    borderRadius: 26,
     borderWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 14,
+    paddingHorizontal: 18,
   },
-  searchInput: { flex: 1, fontSize: 15, height: '100%' },
+  searchInput: { flex: 1, fontSize: 17, height: '100%' },
   results: {
     borderRadius: 14,
     borderWidth: StyleSheet.hairlineWidth,
