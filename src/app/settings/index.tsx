@@ -1,7 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
 import { router } from 'expo-router';
-import { DrawerToggleButton } from 'expo-router/drawer';
 import { Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -31,12 +30,15 @@ export default function SettingsIndex() {
   return (
     <ThemedView style={styles.screen}>
       <View style={[styles.header, { paddingTop: insets.top + Spacing.one }]}>
-        <DrawerToggleButton tintColor={theme.text} />
         <ThemedText type="subtitle">Settings</ThemedText>
       </View>
 
       <ScrollView
-        contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + Spacing.six }]}>
+        // Extra room so the last row clears the floating nav pill.
+        contentContainerStyle={[
+          styles.body,
+          { paddingBottom: insets.bottom + Spacing.six + Spacing.six },
+        ]}>
         <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}>
           <NavRow
             icon="color-palette-outline"
@@ -50,6 +52,14 @@ export default function SettingsIndex() {
             onPress={() => router.push('/settings/permissions')}
             divider
           />
+          {Platform.OS !== 'web' && (
+            <NavRow
+              icon="cloud-download-outline"
+              label="Offline maps"
+              onPress={() => router.push('/settings/offline-maps')}
+              divider
+            />
+          )}
         </View>
 
         <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
@@ -125,7 +135,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.one,
-    paddingRight: Spacing.three,
+    paddingHorizontal: Spacing.three,
     paddingBottom: Spacing.two,
   },
   body: {

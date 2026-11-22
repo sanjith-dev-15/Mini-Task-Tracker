@@ -57,10 +57,13 @@
         {
           "android": {
             "enabled": true,
-            "singleShareMimeTypes": ["text/plain"]
+            "singleShareMimeTypes": [
+              "text/plain"
+            ]
           }
         }
-      ]
+      ],
+      "expo-image"
     ],
     "experiments": {
       "typedRoutes": true,

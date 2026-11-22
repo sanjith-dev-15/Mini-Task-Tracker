@@ -19,7 +19,7 @@ import { useThemeContext } from '@/lib/theme';
 
 type NavItem = {
   label: string;
-  route: '/' | '/expenses';
+  route: '/' | '/notes' | '/expenses' | '/settings';
   match: (pathname: string) => boolean;
   icon: keyof typeof Ionicons.glyphMap;
   iconActive: keyof typeof Ionicons.glyphMap;
@@ -33,12 +33,28 @@ const ITEMS: NavItem[] = [
     icon: 'home-outline',
     iconActive: 'home',
   },
+  // Notes is hidden from the pill for now — the screen still exists; uncomment
+  // to bring the tab back.
+  // {
+  //   label: 'Notes',
+  //   route: '/notes',
+  //   match: (p) => p.startsWith('/notes'),
+  //   icon: 'document-text-outline',
+  //   iconActive: 'document-text',
+  // },
   {
     label: 'Expenses',
     route: '/expenses',
     match: (p) => p.startsWith('/expenses'),
     icon: 'wallet-outline',
     iconActive: 'wallet',
+  },
+  {
+    label: 'Settings',
+    route: '/settings',
+    match: (p) => p.startsWith('/settings'),
+    icon: 'settings-outline',
+    iconActive: 'settings',
   },
 ];
 
@@ -50,9 +66,9 @@ const TRAIL = { damping: 15, stiffness: 150, mass: 1 };
 /** How much the chip swells while it's moving / being dragged. */
 const LIFT = 1.1;
 
-// <GlassNav> is rendered per-screen (inside the drawer's screenLayout, so the
-// sidebar scrim covers it). These module-level caches let the sliding chip carry
-// its position across those per-screen remounts.
+// <GlassNav> is rendered per-screen (inside the root navigator's screenLayout).
+// These module-level caches let the sliding chip carry its position across
+// those per-screen remounts.
 const layoutCache: Record<string, LayoutRectangle> = {};
 let lastChip: { x: number; w: number } | null = null;
 
@@ -97,7 +113,7 @@ export function GlassNav() {
 
   useEffect(() => {
     if (!activeRoute) {
-      // A screen without a tab (Notes, Settings) — nothing to highlight.
+      // A screen without a tab (e.g. the Tasks list) — nothing to highlight.
       shown.value = withTiming(0, { duration: 150 });
       seeded.current = false;
       return;
@@ -193,8 +209,7 @@ export function GlassNav() {
 
   // Hidden where a screen owns the whole view or has its own back nav: the
   // full-screen map, the add-expense sheet, the reminder editor, every Settings
-  // sub-page. (Rendered inside the drawer's screen layer, so the drawer scrim
-  // covers it when open.)
+  // sub-page.
   if (
     pathname === '/map' ||
     pathname === '/expenses/new' ||
@@ -256,7 +271,8 @@ export function GlassNav() {
                     onLayout={onItemLayout(item.route)}
                     style={styles.item}
                     onPress={() => {
-                      if (!item.match(pathname)) router.navigate(item.route);
+                      // Also from a sub-page (e.g. a note) back to the section's list.
+                      if (pathname !== item.route) router.navigate(item.route);
                     }}>
                     <TabIcon
                       name={active ? item.iconActive : item.icon}

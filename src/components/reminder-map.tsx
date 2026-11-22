@@ -4,8 +4,11 @@ import * as Location from 'expo-location';
 import {
   Camera,
   type CameraRef,
+  GeoJSONSource,
+  Layer,
   LogManager,
   Map,
+  type MapRef,
   Marker,
   useCurrentPosition,
 } from '@maplibre/maplibre-react-native';
@@ -29,8 +32,19 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useGlassAlert } from '@/components/glass-alert';
 import { ThemedText } from '@/components/themed-text';
 import { reverseGeocode, searchPlaces, type Suggestion } from '@/lib/geocode';
+import {
+  MAX_AREA_TILES,
+  MAP_STYLE_URL as STYLE_URL,
+  OFFLINE_COLOR,
+  downloadArea,
+  estimateBytes,
+  estimateTiles,
+  formatBytes,
+  useOfflineAreas,
+} from '@/lib/offline-maps';
 import { formatDue, isOverdue } from '@/lib/reminder-dates';
 import { useThemeContext } from '@/lib/theme';
 import type { Reminder, ReminderLocation } from '@/lib/reminders';
@@ -47,13 +61,6 @@ LogManager.onLog(
     log.tag === 'Mbgl-HttpRequest' &&
     /cancell?ed|stream was reset: cancel/i.test(log.message),
 );
-
-/** OpenFreeMap — hosted vector tiles, no API key, no usage limits. */
-const STYLE_URL = {
-  // `bright` carries more POI labels / building detail than `liberty`.
-  light: 'https://tiles.openfreemap.org/styles/bright',
-  dark: 'https://tiles.openfreemap.org/styles/dark',
-};
 
 /**
  * Satellite view — Esri World Imagery, with Esri's place-name layer on top so
@@ -111,6 +118,19 @@ function pinLabel(r: Reminder): string {
   return named || 'Reminder';
 }
 
+/**
+ * Name for a downloaded map area, from the address at its centre: the first two
+ * named parts ("Indiranagar, Bengaluru"), skipping house numbers and postcodes.
+ */
+function areaName(label: string | undefined): string {
+  const named = (label ?? '')
+    .split(',')
+    .map((p) => p.trim())
+    .filter((p) => /[a-z]{3,}/i.test(p));
+  if (named.length) return named.slice(0, 2).join(', ');
+  return `Map area · ${new Date().toLocaleDateString()}`;
+}
+
 export type { LatLng } from '@/lib/geocode';
 
 /** Great-circle distance in km between two `[lng, lat]` points. */
@@ -144,6 +164,8 @@ type Props = {
   onExpand?: () => void;
   /** When set, a close button is shown in the top bar (full-screen mode). */
   onClose?: () => void;
+  /** When set, a button opens the offline-maps list (Settings → Offline maps). */
+  onOpenOfflineMaps?: () => void;
   /** Show the place/address search bar in the top bar. */
   searchable?: boolean;
   /**
@@ -162,6 +184,7 @@ export function ReminderMap({
   onLongPressMap,
   onExpand,
   onClose,
+  onOpenOfflineMaps,
   searchable,
   pickMode,
   fullBleed,
@@ -170,7 +193,38 @@ export function ReminderMap({
   const { colors, scheme } = useThemeContext();
   const insets = useSafeAreaInsets();
   const cameraRef = useRef<CameraRef>(null);
+  const mapRef = useRef<MapRef>(null);
   const [locating, setLocating] = useState(false);
+
+  // Offline download — only offered on the full-screen map.
+  const { alert: glassAlert, showAlert } = useGlassAlert();
+  const { areas: offlineAreas } = useOfflineAreas();
+  /** Area started from this map, so its progress shows in the pill. */
+  const [downloadId, setDownloadId] = useState<string | null>(null);
+  const [preparing, setPreparing] = useState(false);
+  const downloading = downloadId ? offlineAreas.find((a) => a.id === downloadId) : undefined;
+  /** Each downloaded area as a rectangle, tinted on the map. */
+  const offlineShapes: GeoJSON.FeatureCollection = {
+    type: 'FeatureCollection',
+    features: offlineAreas.map((a) => {
+      const [w, s, e, n] = a.bounds;
+      return {
+        type: 'Feature',
+        id: a.id,
+        properties: { complete: a.state === 'complete' },
+        geometry: {
+          type: 'Polygon',
+          coordinates: [[[w, s], [e, s], [e, n], [w, n], [w, s]]],
+        },
+      };
+    }),
+  };
+  // Hide the "Saved" pill a few seconds after the download finishes.
+  useEffect(() => {
+    if (downloading?.state !== 'complete') return;
+    const t = setTimeout(() => setDownloadId(null), 3000);
+    return () => clearTimeout(t);
+  }, [downloading?.state]);
 
   /** Map rotation in degrees (0 = north up), rounded to whole degrees. */
   const [bearing, setBearing] = useState(0);
@@ -202,6 +256,8 @@ export function ReminderMap({
   const [results, setResults] = useState<Suggestion[]>([]);
   const [searching, setSearching] = useState(false);
   const [notFound, setNotFound] = useState(false);
+  /** Search couldn't reach the server (usually: no internet). */
+  const [searchFailed, setSearchFailed] = useState(false);
   const [spot, setSpot] = useState<ReminderLocation | null>(null);
 
   /** Reminder whose info card is open (tapped pin). */
@@ -286,6 +342,58 @@ export function ReminderMap({
     }
   };
 
+  /** Save the street map currently on screen for offline use. */
+  const offerDownload = async () => {
+    if (preparing || downloading?.state === 'downloading') return;
+    setPreparing(true);
+    try {
+      const bounds = await mapRef.current?.getBounds();
+      if (!bounds) return;
+      const tiles = estimateTiles(bounds);
+      if (tiles > MAX_AREA_TILES) {
+        showAlert({
+          title: 'Area too large',
+          message: 'Zoom in to a city or smaller region, then try again.',
+          icon: 'search-outline',
+          tone: 'accent',
+          actions: [{ label: 'OK', onPress: () => {} }],
+        });
+        return;
+      }
+      const [w, s, e, n] = bounds;
+      const name = areaName(await reverseGeocode((s + n) / 2, (w + e) / 2));
+      showAlert({
+        title: 'Download this area?',
+        message:
+          `${name}\n\nThe street map you can see will work without internet ` +
+          `(about ${formatBytes(estimateBytes(tiles))}). ` +
+          'Satellite view and place search still need internet.',
+        icon: 'cloud-download-outline',
+        tone: 'accent',
+        actions: [
+          { label: 'Cancel', style: 'cancel', onPress: () => {} },
+          {
+            label: 'Download',
+            onPress: () => {
+              downloadArea(bounds, name)
+                .then(setDownloadId)
+                .catch(() =>
+                  showAlert({
+                    title: "Couldn't start download",
+                    message: 'Check your internet connection and try again.',
+                    icon: 'cloud-offline-outline',
+                    actions: [{ label: 'OK', onPress: () => {} }],
+                  }),
+                );
+            },
+          },
+        ],
+      });
+    } finally {
+      setPreparing(false);
+    }
+  };
+
   /** Drop a pin on the device's current position — no search needed. */
   const pinMyLocation = async () => {
     if (locating) return;
@@ -328,10 +436,12 @@ export function ReminderMap({
       const next = await searchPlaces(q, bias);
       if (reqId !== reqRef.current) return; // a newer keystroke superseded this
       setResults(next);
+      setSearchFailed(false);
       setNotFound(next.length === 0);
     } catch {
       if (reqId === reqRef.current) {
         setResults([]);
+        setSearchFailed(true);
         setNotFound(true);
       }
     } finally {
@@ -464,18 +574,81 @@ export function ReminderMap({
     </Pressable>
   );
 
-  /** Right-hand column: compass, then layer toggle, then "my location". */
+  // Offline download — full-screen street map only (satellite can't be saved).
+  const offlineButton = onClose && !pickMode && !satellite && (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="Download this area for offline use"
+      onPress={offerDownload}
+      style={({ pressed }) => [
+        styles.roundBtn,
+        { backgroundColor: colors.card, borderColor: colors.border, opacity: pressed ? 0.7 : 1 },
+      ]}>
+      {preparing ? (
+        <ActivityIndicator size="small" color={colors.accent} />
+      ) : (
+        <Ionicons name="cloud-download-outline" size={18} color={colors.accent} />
+      )}
+    </Pressable>
+  );
+
+  // Opens the list of saved areas (Settings → Offline maps).
+  const offlineListButton = onOpenOfflineMaps && !pickMode && (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="Manage offline maps"
+      onPress={onOpenOfflineMaps}
+      style={({ pressed }) => [
+        styles.roundBtn,
+        { backgroundColor: colors.card, borderColor: colors.border, opacity: pressed ? 0.7 : 1 },
+      ]}>
+      <Ionicons name="albums-outline" size={18} color={OFFLINE_COLOR} />
+      {offlineAreas.length > 0 && (
+        <View style={[styles.badge, { borderColor: colors.card }]}>
+          <ThemedText style={styles.badgeText}>{offlineAreas.length}</ThemedText>
+        </View>
+      )}
+    </Pressable>
+  );
+
+  /** Right-hand column: compass, offline list + download, layer toggle, "my location". */
   const sideButtons = (
     <View style={styles.sideButtons}>
       {compassButton}
+      {offlineListButton}
+      {offlineButton}
       {layerButton}
       {locateButton}
     </View>
   );
 
+  const downloadPill = downloading && (
+    <View
+      pointerEvents="none"
+      style={[
+        styles.downloadPill,
+        { top: insets.top + 8, backgroundColor: colors.card, borderColor: colors.border },
+      ]}>
+      {downloading.state === 'complete' ? (
+        <Ionicons name="checkmark-circle" size={16} color={colors.accent} />
+      ) : downloading.state === 'error' ? (
+        <Ionicons name="cloud-offline-outline" size={16} color={colors.danger} />
+      ) : (
+        <ActivityIndicator size="small" color={colors.accent} />
+      )}
+      <ThemedText type="small" numberOfLines={1}>
+        {downloading.state === 'complete'
+          ? 'Saved for offline use'
+          : downloading.state === 'error'
+            ? 'Download stopped — resume in Offline maps'
+            : `Downloading offline map… ${Math.floor(downloading.percentage)}%`}
+      </ThemedText>
+    </View>
+  );
+
   const searchBox = (
     <View style={[styles.searchBox, { backgroundColor: colors.card, borderColor: colors.border }]}>
-      <Ionicons name="search" size={17} color={colors.textSecondary} />
+      <Ionicons name="search" size={21} color={colors.textSecondary} />
       <TextInput
         value={query}
         onChangeText={onQueryChange}
@@ -490,7 +663,7 @@ export function ReminderMap({
         <ActivityIndicator size="small" color={colors.textSecondary} />
       ) : query.length > 0 ? (
         <Pressable onPress={clearSearch} hitSlop={8}>
-          <Ionicons name="close-circle" size={18} color={colors.textSecondary} />
+          <Ionicons name="close-circle" size={22} color={colors.textSecondary} />
         </Pressable>
       ) : null}
     </View>
@@ -614,6 +787,7 @@ export function ReminderMap({
         style,
       ]}>
       <Map
+        ref={mapRef}
         style={StyleSheet.absoluteFill}
         mapStyle={
           satellite ? SATELLITE_STYLE : scheme === 'dark' ? STYLE_URL.dark : STYLE_URL.light
@@ -637,6 +811,36 @@ export function ReminderMap({
           handleLongPress(lat, lng);
         }}>
         <Camera ref={cameraRef} initialViewState={initialViewState} />
+
+        {/* Downloaded offline areas: light purple tint + border. Solid border
+            once saved, dashed while still downloading / paused. Street map
+            only — satellite imagery isn't part of the download. */}
+        {!satellite && offlineShapes.features.length > 0 && (
+          <GeoJSONSource id="offline-areas" data={offlineShapes}>
+            <Layer
+              type="fill"
+              id="offline-areas-fill"
+              paint={{ 'fill-color': OFFLINE_COLOR, 'fill-opacity': 0.1 }}
+            />
+            <Layer
+              type="line"
+              id="offline-areas-line"
+              filter={['==', ['get', 'complete'], true]}
+              paint={{ 'line-color': OFFLINE_COLOR, 'line-width': 2, 'line-opacity': 0.9 }}
+            />
+            <Layer
+              type="line"
+              id="offline-areas-line-pending"
+              filter={['==', ['get', 'complete'], false]}
+              paint={{
+                'line-color': OFFLINE_COLOR,
+                'line-width': 2,
+                'line-opacity': 0.9,
+                'line-dasharray': [2, 2],
+              }}
+            />
+          </GeoJSONSource>
+        )}
         {located.map((r) => {
           const loc = r.location!;
           const active = r.id === selectedId;
@@ -778,6 +982,8 @@ export function ReminderMap({
       )}
 
       {pinCard}
+      {downloadPill}
+      {glassAlert}
 
       {searchable && !selected ? (
         <Animated.View style={[styles.bottomBar, bottomBarStyle]} pointerEvents="box-none">
@@ -786,7 +992,9 @@ export function ReminderMap({
               <View
                 style={[styles.hint, { backgroundColor: colors.card, borderColor: colors.border }]}>
                 <ThemedText type="small" themeColor="textSecondary">
-                  No place found for “{query.trim()}”
+                  {searchFailed
+                    ? 'Search needs internet — long-press the map to drop a pin'
+                    : `No place found for “${query.trim()}”`}
                 </ThemedText>
               </View>
             )}
@@ -974,13 +1182,13 @@ const styles = StyleSheet.create({
   searchBox: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    height: 40,
-    borderRadius: 20,
+    gap: 10,
+    height: 52,
+    borderRadius: 26,
     borderWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 14,
+    paddingHorizontal: 18,
   },
-  searchInput: { flex: 1, fontSize: 15, height: '100%' },
+  searchInput: { flex: 1, fontSize: 17, height: '100%' },
   results: {
     borderRadius: 14,
     borderWidth: StyleSheet.hairlineWidth,
@@ -1020,6 +1228,32 @@ const styles = StyleSheet.create({
   // Ionicons "navigate" points up-right; turn it so the tip points north.
   compassIcon: { transform: [{ rotate: '-45deg' }] },
   expandBtn: { right: 10, top: 10 },
+  badge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 2,
+    paddingHorizontal: 3,
+    backgroundColor: OFFLINE_COLOR,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badgeText: { color: '#fff', fontSize: 10, lineHeight: 12, fontWeight: '700' },
+  downloadPill: {
+    position: 'absolute',
+    alignSelf: 'center',
+    maxWidth: '70%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 14,
+  },
   pickHint: {
     position: 'absolute',
     alignSelf: 'center',

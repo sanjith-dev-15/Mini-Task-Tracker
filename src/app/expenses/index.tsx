@@ -1,7 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
-import { DrawerToggleButton } from 'expo-router/drawer';
 import { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -133,7 +132,6 @@ export default function ExpensesScreen() {
   return (
     <ThemedView style={styles.screen}>
       <View style={[styles.header, { paddingTop: insets.top + Spacing.one }]}>
-        <DrawerToggleButton tintColor={theme.text} />
         <ThemedText type="subtitle" style={styles.flex}>
           Expenses
         </ThemedText>
@@ -704,7 +702,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.one,
-    paddingRight: Spacing.three,
+    paddingHorizontal: Spacing.three,
     paddingBottom: Spacing.two,
   },
   periodBar: {

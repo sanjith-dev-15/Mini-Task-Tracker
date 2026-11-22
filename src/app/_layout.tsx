@@ -1,11 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
-import { DarkTheme, DefaultTheme, ThemeProvider as NavThemeProvider } from 'expo-router';
-import {
-  Drawer,
-  DrawerContentScrollView,
-  DrawerItem,
-  type DrawerContentComponentProps,
-} from 'expo-router/drawer';
+import { DarkTheme, DefaultTheme, Tabs, ThemeProvider as NavThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState, type ReactNode } from 'react';
@@ -18,7 +11,6 @@ import { ArrivalModal } from '@/components/arrival-modal';
 import { GlassNav } from '@/components/glass-nav';
 import { PermissionGate } from '@/components/permission-gate';
 import { UpdatePrompt } from '@/components/update-prompt';
-import { Spacing } from '@/constants/theme';
 import { AuthProvider } from '@/lib/auth';
 import { ExpensesProvider } from '@/lib/expenses';
 // Registers the geofencing background task + notification handler at module load.
@@ -34,8 +26,8 @@ SplashScreen.preventAutoHideAsync().catch(() => {});
 /**
  * Root layout.
  * - Global providers: safe area, gestures, theme, notes store.
- * - The sidebar (Drawer): Notes + Mini Task Tracker at the top, Settings pinned
- *   to the bottom (see `SidebarContent`).
+ * - Top-level sections (Home, Notes, Expenses, Settings) are switched with the
+ *   floating <GlassNav> pill; the navigator's own tab bar is hidden.
  * The app opens on the Mini Task Tracker Home tab (see `unstable_settings`).
  */
 export const unstable_settings = {
@@ -85,9 +77,8 @@ function BankSmsSync() {
 }
 
 /**
- * Wraps every drawer screen. The floating <GlassNav> lives here (not as a
- * sibling of <Drawer>) so it sits in the screen layer — the drawer's dim scrim
- * and panel slide over it when the sidebar opens, instead of it floating on top.
+ * Wraps every top-level screen with the floating <GlassNav> pill, so it sits in
+ * the screen layer (under modals) rather than floating above everything.
  */
 function ScreenFrame({ children }: { children: ReactNode }) {
   return (
@@ -104,85 +95,28 @@ function ThemedRoot() {
 
   return (
     <NavThemeProvider value={isDark ? DarkTheme : DefaultTheme}>
-      <Drawer
-        drawerContent={(props) => <SidebarContent {...props} />}
+      <Tabs
         initialRouteName="(tabs)"
         backBehavior="initialRoute"
+        tabBar={() => null}
         screenLayout={({ children }) => <ScreenFrame>{children}</ScreenFrame>}
         screenOptions={{
           headerShown: false,
-          drawerStyle: { backgroundColor: colors.card, width: 260 },
-          drawerType: 'front',
+          sceneStyle: { backgroundColor: colors.background },
         }}>
-        <Drawer.Screen name="(tabs)" options={{ title: 'Mini Task Tracker' }} />
-        <Drawer.Screen name="notes" options={{ title: 'Notes' }} />
-        <Drawer.Screen name="expenses" options={{ title: 'Expenses' }} />
-        <Drawer.Screen name="settings" options={{ title: 'Settings' }} />
-        <Drawer.Screen
-          name="reminder"
-          options={{ title: 'Reminder', drawerItemStyle: { display: 'none' } }}
-        />
-        <Drawer.Screen
-          name="map"
-          options={{ title: 'Map', drawerItemStyle: { display: 'none' } }}
-        />
-      </Drawer>
+        <Tabs.Screen name="(tabs)" options={{ title: 'Mini Task Tracker' }} />
+        <Tabs.Screen name="notes" options={{ title: 'Notes' }} />
+        <Tabs.Screen name="expenses" options={{ title: 'Expenses' }} />
+        <Tabs.Screen name="settings" options={{ title: 'Settings' }} />
+        <Tabs.Screen name="reminder" options={{ title: 'Reminder' }} />
+        <Tabs.Screen name="map" options={{ title: 'Map' }} />
+      </Tabs>
       <ArrivalModal />
       <StatusBar style={isDark ? 'light' : 'dark'} />
     </NavThemeProvider>
   );
 }
 
-const SIDEBAR_ITEMS: {
-  name: string;
-  label: string;
-  icon: keyof typeof Ionicons.glyphMap;
-}[] = [
-  { name: '(tabs)', label: 'Mini Task Tracker', icon: 'checkbox-outline' },
-  { name: 'notes', label: 'Notes', icon: 'document-text-outline' },
-  { name: 'expenses', label: 'Expenses', icon: 'wallet-outline' },
-];
-
-function SidebarContent(props: DrawerContentComponentProps) {
-  const { colors } = useThemeContext();
-  const { state, navigation } = props;
-  const currentRoute = state.routes[state.index]?.name;
-
-  const renderItem = (name: string, label: string, icon: keyof typeof Ionicons.glyphMap) => (
-    <DrawerItem
-      key={name}
-      label={label}
-      focused={currentRoute === name}
-      activeTintColor={colors.accent}
-      inactiveTintColor={colors.textSecondary}
-      activeBackgroundColor={colors.backgroundSelected}
-      icon={({ color, size }) => <Ionicons name={icon} size={size} color={color} />}
-      onPress={() => {
-        // Always close the sidebar — navigating to the screen you're already on
-        // changes nothing, so the drawer would otherwise stay open.
-        navigation.closeDrawer();
-        if (currentRoute !== name) navigation.navigate(name);
-      }}
-    />
-  );
-
-  return (
-    <DrawerContentScrollView {...props} contentContainerStyle={styles.drawerContent}>
-      <View>{SIDEBAR_ITEMS.map((item) => renderItem(item.name, item.label, item.icon))}</View>
-
-      <View style={[styles.drawerFooter, { borderTopColor: colors.border }]}>
-        {renderItem('settings', 'Settings', 'settings-outline')}
-      </View>
-    </DrawerContentScrollView>
-  );
-}
-
 const styles = StyleSheet.create({
   screenFrame: { flex: 1 },
-  drawerContent: { flex: 1 },
-  drawerFooter: {
-    marginTop: 'auto',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    paddingTop: Spacing.one,
-  },
 });
