@@ -1,12 +1,11 @@
 import { Tabs } from 'expo-router';
-import { DrawerToggleButton } from 'expo-router/drawer';
 
 import { useTheme } from '@/hooks/use-theme';
 
 /**
- * Bottom-tab navigator for the "Mini Task Tracker" section (sidebar item #2).
+ * Bottom-tab navigator for the "Mini Task Tracker" (Home) section.
  * The tab bar is hidden — navigation is handled by the global <GlassNav> pill
- * rendered in the root layout. The header keeps the ☰ button for the sidebar.
+ * rendered in the root layout.
  */
 export const unstable_settings = {
   initialRouteName: 'index',
@@ -19,7 +18,6 @@ export default function TabsLayout() {
     <Tabs
       tabBar={() => null}
       screenOptions={{
-        headerLeft: () => <DrawerToggleButton tintColor={colors.text} />,
         headerStyle: { backgroundColor: colors.background },
         headerTitleStyle: { color: colors.text },
         headerShadowVisible: false,

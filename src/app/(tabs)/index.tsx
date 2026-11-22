@@ -1,6 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { DrawerToggleButton } from 'expo-router/drawer';
 import { useRef, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -148,7 +147,6 @@ export default function HomeScreen() {
   return (
     <ThemedView style={styles.screen}>
       <View style={[styles.header, { paddingTop: insets.top + Spacing.one }]}>
-        <DrawerToggleButton tintColor={theme.text} />
         <ThemedText type="subtitle" style={styles.headerTitle}>
           Home
         </ThemedText>
@@ -254,7 +252,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.one,
-    paddingRight: Spacing.three,
+    paddingHorizontal: Spacing.three,
     paddingBottom: Spacing.two,
   },
   headerTitle: { flex: 1 },
